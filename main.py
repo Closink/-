@@ -108,8 +108,6 @@ def format_rates_message(rates: dict, previous_rates: dict, date: datetime) -> s
         f"<code>{rates.get('CNY', 0):.4f} ₽</code>\n"
         f"<code>{rates.get('USD', 0):.4f} ₽</code>\n"
         f"<code>{rates.get('EUR', 0):.4f} ₽</code>\n\n"
-        f"2\n\n"
-        f"7  {datetime.now().strftime('%H:%M')}\n\n"
         f"💬 Прокомментировать"
     )
     
