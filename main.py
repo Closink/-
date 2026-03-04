@@ -6,6 +6,8 @@ from xml.etree import ElementTree
 from typing import Dict, Tuple
 import pickle
 import random
+import json
+from collections import deque
 
 import aiohttp
 from aiogram import Bot, Dispatcher, types
@@ -22,6 +24,8 @@ CBR_URL = "https://www.cbr.ru/scripts/XML_daily.asp"
 
 PREVIOUS_RATES_FILE = "previous_rates.pkl"
 PHOTO_SETTINGS_FILE = "photo_settings.pkl"
+HISTORY_FILE = "rates_history.pkl"
+STATS_FILE = "stats.pkl"
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -37,6 +41,57 @@ photo_settings = {
     'photo_url': '',
     'photo_file_id': ''
 }
+
+stats = {
+    'total_requests': 0,
+    'total_sent': 0,
+    'last_update': None,
+    'users_count': set(),
+    'daily_stats': {},
+    'weekly_avg': {}
+}
+
+rates_history = deque(maxlen=30)
+
+def save_stats():
+    try:
+        stats['users_count'] = list(stats['users_count'])
+        with open(STATS_FILE, 'wb') as f:
+            pickle.dump(stats, f)
+    except Exception as e:
+        logger.error(f"Ошибка при сохранении статистики: {e}")
+
+def load_stats():
+    global stats
+    try:
+        if os.path.exists(STATS_FILE):
+            with open(STATS_FILE, 'rb') as f:
+                loaded = pickle.load(f)
+                loaded['users_count'] = set(loaded['users_count'])
+                stats.update(loaded)
+    except Exception as e:
+        logger.error(f"Ошибка при загрузке статистики: {e}")
+
+def save_rates_history(rates: dict):
+    try:
+        rates_history.append({
+            'date': datetime.now(),
+            'rates': rates.copy()
+        })
+        with open(HISTORY_FILE, 'wb') as f:
+            pickle.dump(list(rates_history), f)
+    except Exception as e:
+        logger.error(f"Ошибка при сохранении истории: {e}")
+
+def load_rates_history():
+    global rates_history
+    try:
+        if os.path.exists(HISTORY_FILE):
+            with open(HISTORY_FILE, 'rb') as f:
+                data = pickle.load(f)
+                rates_history = deque(data, maxlen=30)
+    except Exception as e:
+        logger.error(f"Ошибка при загрузке истории: {e}")
 
 def save_photo_settings():
     try:
@@ -73,13 +128,22 @@ def load_previous_rates() -> dict:
 def get_trend_emoji(current: float, previous: float) -> str:
     if previous == 0:
         return "🔄"
-    
     if current > previous:
         return "📈"
     elif current < previous:
         return "📉"
     else:
         return "➖"
+
+def get_trend_arrow(current: float, previous: float) -> str:
+    if previous == 0:
+        return "○"
+    if current > previous:
+        return "▲"
+    elif current < previous:
+        return "▼"
+    else:
+        return "■"
 
 def get_trend_color(current: float, previous: float) -> str:
     if previous == 0:
@@ -91,18 +155,80 @@ def get_trend_color(current: float, previous: float) -> str:
     else:
         return "#FFFF00"
 
+def format_change(change: float) -> str:
+    if change > 0:
+        return f"+{change:.4f}"
+    elif change < 0:
+        return f"{change:.4f}"
+    else:
+        return "0.0000"
+
+def get_change_emoji(change: float) -> str:
+    if change > 0:
+        return "🟢"
+    elif change < 0:
+        return "🔴"
+    else:
+        return "⚪"
+
+def get_market_status(rates: dict, previous: dict) -> dict:
+    usd_change = rates.get('USD', 0) - previous.get('USD', 0)
+    eur_change = rates.get('EUR', 0) - previous.get('EUR', 0)
+    cny_change = rates.get('CNY', 0) - previous.get('CNY', 0)
+    
+    up_count = sum(1 for x in [usd_change, eur_change, cny_change] if x > 0)
+    down_count = sum(1 for x in [usd_change, eur_change, cny_change] if x < 0)
+    
+    if up_count == 3:
+        return {"status": "🚀 РЫНОК РАСТЕТ", "color": "🟢", "desc": "Все валюты дорожают"}
+    elif down_count == 3:
+        return {"status": "📉 РЫНОК ПАДАЕТ", "color": "🔴", "desc": "Все валюты дешевеют"}
+    elif up_count > down_count:
+        return {"status": "📊 СМЕШАННАЯ ДИНАМИКА", "color": "🟡", "desc": "Преимущественно рост"}
+    elif down_count > up_count:
+        return {"status": "📊 СМЕШАННАЯ ДИНАМИКА", "color": "🟠", "desc": "Преимущественно падение"}
+    else:
+        return {"status": "⚖️ СТАБИЛЬНОСТЬ", "color": "⚪", "desc": "Разнонаправленное движение"}
+
 def get_random_greeting():
-    greetings = [
-        "☀️ Доброе утро!",
-        "🌅 Хорошего дня!",
-        "💼 Удачной недели!",
-        "📈 Прибыльных инвестиций!",
-        "💰 Отличных заработков!",
-        "🌟 Пусть день будет удачным!",
-        "💫 С добрым утром!",
-        "✨ Новый день - новые возможности!"
+    morning_greetings = [
+        "✨ ДОБРОЕ УТРО! ✨",
+        "🌟 ПРЕКРАСНОГО УТРА! 🌟",
+        "☀️ С ДОБРЫМ УТРОМ! ☀️",
+        "💫 НОВОГО ДНЯ! 💫",
+        "🌅 ХОРОШЕГО НАЧАЛА! 🌅",
+        "⭐ УДАЧНОГО ДНЯ! ⭐",
+        "🎯 ПРОДУКТИВНОГО УТРА! 🎯",
+        "🚀 ВЗЛЕТАЙ С НАМИ! 🚀"
     ]
-    return random.choice(greetings)
+    return random.choice(morning_greetings)
+
+def get_weather_emoji():
+    weather = ["☀️", "🌤️", "⛅", "🌥️", "☁️", "🌦️", "🌧️", "⛈️", "❄️", "🌪️"]
+    return random.choice(weather)
+
+def get_motivation():
+    messages = [
+        "💎 Каждая копейка - шаг к миллиону!",
+        "📈 Инвестируй с умом!",
+        "💰 Деньги любят счет!",
+        "🎯 Финансовая грамотность - ключ к успеху!",
+        "⭐ Следи за курсом, будь в тренде!",
+        "🚀 К новым финансовым высотам!",
+        "💫 Твой капитал в надежных руках!",
+        "🌟 Зарабатывай больше с нами!"
+    ]
+    return random.choice(messages)
+
+def create_progress_bar(value: float, min_val: float, max_val: float, length: int = 10) -> str:
+    if max_val == min_val:
+        return "█" * length + "⚪"
+    
+    position = int((value - min_val) / (max_val - min_val) * length)
+    position = max(0, min(position, length))
+    
+    bar = "█" * position + "░" * (length - position)
+    return bar
 
 async def fetch_exchange_rates() -> dict:
     try:
@@ -121,7 +247,6 @@ async def fetch_exchange_rates() -> dict:
                             nominal = valute.find('Nominal').text
                             
                             rate = float(value.replace(',', '.')) / int(nominal)
-                            
                             rates[char_code] = round(rate, 4)
                     
                     return rates
@@ -134,122 +259,141 @@ async def fetch_exchange_rates() -> dict:
 
 def format_rates_message(rates: dict, previous_rates: dict, date: datetime) -> str:
     date_str = date.strftime("%d.%m.%Y")
-    
-    usd_trend = get_trend_emoji(rates.get('USD', 0), previous_rates.get('USD', 0))
-    eur_trend = get_trend_emoji(rates.get('EUR', 0), previous_rates.get('EUR', 0))
-    cny_trend = get_trend_emoji(rates.get('CNY', 0), previous_rates.get('CNY', 0))
+    time_str = date.strftime("%H:%M")
     
     usd_change = rates.get('USD', 0) - previous_rates.get('USD', 0)
     eur_change = rates.get('EUR', 0) - previous_rates.get('EUR', 0)
     cny_change = rates.get('CNY', 0) - previous_rates.get('CNY', 0)
     
-    usd_change_str = f"+{usd_change:.4f}" if usd_change > 0 else f"{usd_change:.4f}"
-    eur_change_str = f"+{eur_change:.4f}" if eur_change > 0 else f"{eur_change:.4f}"
-    cny_change_str = f"+{cny_change:.4f}" if cny_change > 0 else f"{cny_change:.4f}"
+    usd_trend = get_trend_emoji(rates.get('USD', 0), previous_rates.get('USD', 0))
+    eur_trend = get_trend_emoji(rates.get('EUR', 0), previous_rates.get('EUR', 0))
+    cny_trend = get_trend_emoji(rates.get('CNY', 0), previous_rates.get('CNY', 0))
     
-    usd_change_emoji = "🟢" if usd_change > 0 else "🔴" if usd_change < 0 else "⚪"
-    eur_change_emoji = "🟢" if eur_change > 0 else "🔴" if eur_change < 0 else "⚪"
-    cny_change_emoji = "🟢" if cny_change > 0 else "🔴" if cny_change < 0 else "⚪"
+    usd_arrow = get_trend_arrow(rates.get('USD', 0), previous_rates.get('USD', 0))
+    eur_arrow = get_trend_arrow(rates.get('EUR', 0), previous_rates.get('EUR', 0))
+    cny_arrow = get_trend_arrow(rates.get('CNY', 0), previous_rates.get('CNY', 0))
     
-    greeting = get_random_greeting()
+    market = get_market_status(rates, previous_rates)
+    motivation = get_motivation()
     
-    message = (
-        f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"     🏦 <b>ЦЕНТРАЛЬНЫЙ БАНК РФ</b>     \n"
-        f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        
-        f"{greeting}\n\n"
-        
-        f"📅 <b>{date_str}</b>\n"
-        f"⏰ <b>{datetime.now().strftime('%H:%M')}</b> МСК\n\n"
-        
-        f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"     💵 <b>ОФИЦИАЛЬНЫЕ КУРСЫ</b>     \n"
-        f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        
-        f"┌─────────────────────────┐\n"
-        
-        f"│ <b>🇺🇸 ДОЛЛАР США</b>         │\n"
-        f"│ <b>{rates.get('USD', 0):.4f}</b> ₽ {usd_trend}          │\n"
-        f"│ {usd_change_emoji} Изменение: {usd_change_str}   │\n\n"
-        
-        f"│ <b>🇪🇺 ЕВРО</b>                │\n"
-        f"│ <b>{rates.get('EUR', 0):.4f}</b> ₽ {eur_trend}          │\n"
-        f"│ {eur_change_emoji} Изменение: {eur_change_str}   │\n\n"
-        
-        f"│ <b>🇨🇳 КИТАЙСКИЙ ЮАНЬ</b>     │\n"
-        f"│ <b>{rates.get('CNY', 0):.4f}</b> ₽ {cny_trend}          │\n"
-        f"│ {cny_change_emoji} Изменение: {cny_change_str}   │\n"
-        
-        f"└─────────────────────────┘\n\n"
-        
-        f"📊 <b>ДИНАМИКА</b>\n"
-        f"📈 Рост | 📉 Падение | ➖ Без изменений\n\n"
-        
-        f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"     💎 NT SHIPPING CO     \n"
-        f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        
-        f"💬 Прокомментировать"
-    )
+    message = f"""
+╔════════════════════════════════╗
+║     💎 <b>NT SHIPPING CO</b> 💎     ║
+╠════════════════════════════════╣
+║  {get_weather_emoji()} <b>{date_str}</b>  🕐 {time_str} МСК  ║
+╠════════════════════════════════╣
+║        {get_random_greeting()}        ║
+╠════════════════════════════════╣
+║  📊 <b>КУРСЫ ЦБ РФ</b>  {market['color']}  ║
+╠════════════════════════════════╣
+║                                ║
+║  🇺🇸 <b>ДОЛЛАР США</b>              ║
+║  <code>{rates.get('USD', 0):>10.4f}</code> ₽ {usd_trend} {usd_arrow}   ║
+║  {get_change_emoji(usd_change)} Изм: {format_change(usd_change)}    ║
+║  {create_progress_bar(rates.get('USD', 0), 70, 100)}   ║
+║                                ║
+║  🇪🇺 <b>ЕВРО</b>                     ║
+║  <code>{rates.get('EUR', 0):>10.4f}</code> ₽ {eur_trend} {eur_arrow}   ║
+║  {get_change_emoji(eur_change)} Изм: {format_change(eur_change)}    ║
+║  {create_progress_bar(rates.get('EUR', 0), 80, 110)}   ║
+║                                ║
+║  🇨🇳 <b>КИТАЙСКИЙ ЮАНЬ</b>          ║
+║  <code>{rates.get('CNY', 0):>10.4f}</code> ₽ {cny_trend} {cny_arrow}   ║
+║  {get_change_emoji(cny_change)} Изм: {format_change(cny_change)}    ║
+║  {create_progress_bar(rates.get('CNY', 0), 10, 15)}   ║
+║                                ║
+╠════════════════════════════════╣
+║  {market['status']}              ║
+║  {market['desc']}                ║
+╠════════════════════════════════╣
+║  💬 <i>"{motivation}"</i>  ║
+╠════════════════════════════════╣
+║     💎 NT SHIPPING CO 💎       ║
+╚════════════════════════════════╝
+"""
+    return message
+
+def format_trends_message(history: deque) -> str:
+    if not history:
+        return "❌ Нет данных для анализа"
     
+    recent = list(history)[-7:]
+    
+    message = """
+╔════════════════════════════════╗
+║    📊 <b>ИСТОРИЯ ЗА 7 ДНЕЙ</b>    ║
+╠════════════════════════════════╣
+"""
+    
+    message += "║ Дата     │ USD    │ EUR    │ CNY    ║\n"
+    message += "╠════════════════════════════════╣\n"
+    
+    for item in recent:
+        date = item['date'].strftime("%d.%m")
+        usd = item['rates'].get('USD', 0)
+        eur = item['rates'].get('EUR', 0)
+        cny = item['rates'].get('CNY', 0)
+        
+        message += f"║ {date} │ {usd:.2f} │ {eur:.2f} │ {cny:.2f} ║\n"
+    
+    if len(recent) >= 2:
+        first_usd = recent[0]['rates'].get('USD', 0)
+        last_usd = recent[-1]['rates'].get('USD', 0)
+        usd_trend = "📈" if last_usd > first_usd else "📉" if last_usd < first_usd else "➖"
+        
+        first_eur = recent[0]['rates'].get('EUR', 0)
+        last_eur = recent[-1]['rates'].get('EUR', 0)
+        eur_trend = "📈" if last_eur > first_eur else "📉" if last_eur < first_eur else "➖"
+        
+        first_cny = recent[0]['rates'].get('CNY', 0)
+        last_cny = recent[-1]['rates'].get('CNY', 0)
+        cny_trend = "📈" if last_cny > first_cny else "📉" if last_cny < first_cny else "➖"
+        
+        message += f"""
+╠════════════════════════════════╣
+║  <b>ТРЕНД ЗА НЕДЕЛЮ:</b>              ║
+║  🇺🇸 USD: {usd_trend}  {last_usd-first_usd:+.2f} ₽      ║
+║  🇪🇺 EUR: {eur_trend}  {last_eur-first_eur:+.2f} ₽      ║
+║  🇨🇳 CNY: {cny_trend}  {last_cny-first_cny:+.2f} ₽      ║
+"""
+    
+    message += """
+╚════════════════════════════════╝
+"""
     return message
 
 def create_rates_keyboard() -> InlineKeyboardMarkup:
     keyboard = InlineKeyboardMarkup(row_width=2)
     keyboard.add(
-        InlineKeyboardButton(
-            text="🏦 ЦБ РФ",
-            url="https://cbr.ru/"
-        ),
-        InlineKeyboardButton(
-            text="📈 Графики",
-            url="https://www.cbr.ru/currency_base/dynamics/"
-        )
+        InlineKeyboardButton(text="🔄 ОБНОВИТЬ", callback_data="refresh_rates"),
+        InlineKeyboardButton(text="📈 ГРАФИКИ", url="https://www.cbr.ru/currency_base/dynamics/")
     )
     keyboard.add(
-        InlineKeyboardButton(
-            text="💎 Наш сайт",
-            url="https://nt-shipping.ru/"
-        ),
-        InlineKeyboardButton(
-            text="👨‍💻 Разработчик",
-            url="https://t.me/fuckForensics"
-        )
+        InlineKeyboardButton(text="📊 ИСТОРИЯ", callback_data="show_history"),
+        InlineKeyboardButton(text="📉 ТРЕНДЫ", callback_data="show_trends")
     )
     keyboard.add(
-        InlineKeyboardButton(
-            text="🔄 Обновить",
-            callback_data="refresh_rates"
-        )
+        InlineKeyboardButton(text="💎 САЙТ", url="https://nt-shipping.ru/"),
+        InlineKeyboardButton(text="👨‍💻 ПОДДЕРЖКА", url="https://t.me/fuckForensics")
     )
     return keyboard
 
 def create_admin_keyboard() -> InlineKeyboardMarkup:
     keyboard = InlineKeyboardMarkup(row_width=1)
     keyboard.add(
-        InlineKeyboardButton(
-            text="🖼 Настроить фото",
-            callback_data="setup_photo"
-        )
+        InlineKeyboardButton(text="📸 НАСТРОИТЬ ФОТО", callback_data="setup_photo")
     )
     keyboard.add(
-        InlineKeyboardButton(
-            text="📸 Отправить тест с фото",
-            callback_data="test_photo"
-        )
+        InlineKeyboardButton(text="📊 СТАТИСТИКА", callback_data="show_stats")
     )
     keyboard.add(
-        InlineKeyboardButton(
-            text="❌ Отключить фото",
-            callback_data="disable_photo"
-        )
+        InlineKeyboardButton(text="📈 ТЕСТ С ФОТО", callback_data="test_photo")
     )
     keyboard.add(
-        InlineKeyboardButton(
-            text="📊 Проверить фото",
-            callback_data="check_photo"
-        )
+        InlineKeyboardButton(text="❌ ОТКЛЮЧИТЬ ФОТО", callback_data="disable_photo")
+    )
+    keyboard.add(
+        InlineKeyboardButton(text="📋 ПРОВЕРИТЬ ФОТО", callback_data="check_photo")
     )
     return keyboard
 
@@ -307,7 +451,7 @@ async def send_rates_with_photo(chat_id: str, message_text: str, keyboard: Inlin
         )
 
 async def send_daily_rates():
-    logger.info("Отправка ежедневных курсов валют...")
+    logger.info("📨 Отправка ежедневных курсов...")
     
     previous_rates = load_previous_rates()
     rates = await fetch_exchange_rates()
@@ -319,16 +463,22 @@ async def send_daily_rates():
         
         try:
             save_previous_rates(rates)
+            save_rates_history(rates)
+            
+            stats['total_sent'] += 1
+            stats['last_update'] = current_date
+            save_stats()
+            
             await send_rates_with_photo(CHAT_ID, message_text, keyboard)
-            logger.info("Курсы валют успешно отправлены")
+            logger.info("✅ Курсы успешно отправлены")
         except Exception as e:
-            logger.error(f"Ошибка при отправке сообщения: {e}")
+            logger.error(f"❌ Ошибка при отправке: {e}")
     else:
-        logger.error("Не удалось получить курсы валют")
+        logger.error("❌ Не удалось получить курсы")
         try:
             await bot.send_message(
                 chat_id=CHAT_ID,
-                text="❌ <b>Не удалось получить курсы валют сегодня.</b>\nПроверьте соединение с сайтом ЦБ РФ.",
+                text="❌ <b>НЕ УДАЛОСЬ ПОЛУЧИТЬ КУРСЫ</b>\nПроверьте соединение с ЦБ РФ",
                 parse_mode=types.ParseMode.HTML
             )
         except:
@@ -336,7 +486,7 @@ async def send_daily_rates():
 
 @dp.callback_query_handler(lambda c: c.data == 'refresh_rates')
 async def process_refresh_callback(callback_query: types.CallbackQuery):
-    await bot.answer_callback_query(callback_query.id, text="🔄 Обновляю курсы...")
+    await bot.answer_callback_query(callback_query.id, text="🔄 Обновляю...")
     
     previous_rates = load_previous_rates()
     rates = await fetch_exchange_rates()
@@ -354,29 +504,154 @@ async def process_refresh_callback(callback_query: types.CallbackQuery):
                 reply_markup=keyboard,
                 parse_mode=types.ParseMode.HTML
             )
-            await bot.answer_callback_query(callback_query.id, text="✅ Курсы обновлены!")
+            await bot.answer_callback_query(callback_query.id, text="✅ Обновлено!")
         except Exception as e:
-            await bot.answer_callback_query(callback_query.id, text="❌ Ошибка обновления")
+            await bot.answer_callback_query(callback_query.id, text="❌ Ошибка")
     else:
-        await bot.answer_callback_query(callback_query.id, text="❌ Не удалось получить курсы")
+        await bot.answer_callback_query(callback_query.id, text="❌ Ошибка получения")
+
+@dp.callback_query_handler(lambda c: c.data == 'show_history')
+async def process_history_callback(callback_query: types.CallbackQuery):
+    await bot.answer_callback_query(callback_query.id, text="📊 Загружаю историю...")
+    
+    if rates_history:
+        message_text = format_trends_message(rates_history)
+        keyboard = InlineKeyboardMarkup().add(
+            InlineKeyboardButton(text="◀️ НАЗАД", callback_data="back_to_rates")
+        )
+        
+        await bot.edit_message_text(
+            chat_id=callback_query.message.chat.id,
+            message_id=callback_query.message.message_id,
+            text=message_text,
+            reply_markup=keyboard,
+            parse_mode=types.ParseMode.HTML
+        )
+    else:
+        await bot.answer_callback_query(callback_query.id, text="❌ Нет данных")
+
+@dp.callback_query_handler(lambda c: c.data == 'show_trends')
+async def process_trends_callback(callback_query: types.CallbackQuery):
+    await bot.answer_callback_query(callback_query.id, text="📉 Анализирую тренды...")
+    
+    if rates_history and len(rates_history) >= 2:
+        recent = list(rates_history)[-7:]
+        
+        usd_values = [item['rates'].get('USD', 0) for item in recent]
+        eur_values = [item['rates'].get('EUR', 0) for item in recent]
+        cny_values = [item['rates'].get('CNY', 0) for item in recent]
+        
+        usd_min, usd_max = min(usd_values), max(usd_values)
+        eur_min, eur_max = min(eur_values), max(eur_values)
+        cny_min, cny_max = min(cny_values), max(cny_values)
+        
+        trends_text = f"""
+╔════════════════════════════════╗
+║     📉 <b>АНАЛИЗ ТРЕНДОВ</b>      ║
+╠════════════════════════════════╣
+
+<b>🇺🇸 ДОЛЛАР США</b>
+📊 Диапазон: {usd_min:.4f} - {usd_max:.4f} ₽
+📈 Волатильность: {usd_max-usd_min:.4f} ₽
+📊 Прогноз: {"Рост" if usd_values[-1] > usd_values[0] else "Падение"}
+
+<b>🇪🇺 ЕВРО</b>
+📊 Диапазон: {eur_min:.4f} - {eur_max:.4f} ₽
+📈 Волатильность: {eur_max-eur_min:.4f} ₽
+📊 Прогноз: {"Рост" if eur_values[-1] > eur_values[0] else "Падение"}
+
+<b>🇨🇳 КИТАЙСКИЙ ЮАНЬ</b>
+📊 Диапазон: {cny_min:.4f} - {cny_max:.4f} ₽
+📈 Волатильность: {cny_max-cny_min:.4f} ₽
+📊 Прогноз: {"Рост" if cny_values[-1] > cny_values[0] else "Падение"}
+
+╚════════════════════════════════╝
+"""
+        keyboard = InlineKeyboardMarkup().add(
+            InlineKeyboardButton(text="◀️ НАЗАД", callback_data="back_to_rates")
+        )
+        
+        await bot.edit_message_text(
+            chat_id=callback_query.message.chat.id,
+            message_id=callback_query.message.message_id,
+            text=trends_text,
+            reply_markup=keyboard,
+            parse_mode=types.ParseMode.HTML
+        )
+    else:
+        await bot.answer_callback_query(callback_query.id, text="❌ Недостаточно данных")
+
+@dp.callback_query_handler(lambda c: c.data == 'back_to_rates')
+async def process_back_callback(callback_query: types.CallbackQuery):
+    await bot.answer_callback_query(callback_query.id, text="🔄 Возвращаюсь...")
+    
+    previous_rates = load_previous_rates()
+    rates = await fetch_exchange_rates()
+    
+    if rates:
+        current_date = datetime.now()
+        message_text = format_rates_message(rates, previous_rates, current_date)
+        keyboard = create_rates_keyboard()
+        
+        await bot.edit_message_text(
+            chat_id=callback_query.message.chat.id,
+            message_id=callback_query.message.message_id,
+            text=message_text,
+            reply_markup=keyboard,
+            parse_mode=types.ParseMode.HTML
+        )
 
 @dp.callback_query_handler(lambda c: c.data == 'setup_photo')
 async def process_setup_photo(callback_query: types.CallbackQuery):
     await bot.answer_callback_query(callback_query.id)
     await bot.send_message(
         callback_query.from_user.id,
-        "📸 <b>НАСТРОЙКА ФОТО</b>\n\n"
-        "Отправьте фото одним из способов:\n\n"
-        "1️⃣ <b>Загрузите фото файлом</b> - просто отправьте фото\n"
-        "2️⃣ <b>Укажите путь к файлу</b> - отправьте /set_photo_path /путь/к/фото.jpg\n"
-        "3️⃣ <b>Укажите URL фото</b> - отправьте /set_photo_url https://example.com/photo.jpg\n\n"
-        "После отправки фото бот запомнит его и будет использовать при рассылке.",
+        """
+📸 <b>НАСТРОЙКА ФОТО</b>
+
+<b>Способы загрузки:</b>
+
+1️⃣ <b>Отправьте фото</b> - просто отправьте фото боту
+2️⃣ <b>Укажите путь:</b>
+   /set_photo_path /путь/к/фото.jpg
+3️⃣ <b>Укажите URL:</b>
+   /set_photo_url https://example.com/photo.jpg
+
+После загрузки фото будет использоваться при рассылке!
+        """,
+        parse_mode=types.ParseMode.HTML
+    )
+
+@dp.callback_query_handler(lambda c: c.data == 'show_stats')
+async def process_stats_callback(callback_query: types.CallbackQuery):
+    await bot.answer_callback_query(callback_query.id, text="📊 Загружаю статистику...")
+    
+    stats_text = f"""
+╔════════════════════════════════╗
+║     📊 <b>СТАТИСТИКА БОТА</b>     ║
+╠════════════════════════════════╣
+║                                ║
+║  👥 Пользователей: {len(stats['users_count'])}         ║
+║  📨 Отправлено: {stats['total_sent']}            ║
+║  🔄 Запросов: {stats['total_requests']}           ║
+║                                ║
+║  📅 Последнее обновление:      ║
+║  {stats['last_update'].strftime('%d.%m.%Y %H:%M') if stats['last_update'] else 'Нет'}  ║
+║                                ║
+║  📸 Режим фото: {"ВКЛ" if photo_settings['use_photo'] else "ВЫКЛ"}           ║
+║                                ║
+╚════════════════════════════════╝
+"""
+    
+    await bot.send_message(
+        callback_query.from_user.id,
+        stats_text,
         parse_mode=types.ParseMode.HTML
     )
 
 @dp.callback_query_handler(lambda c: c.data == 'test_photo')
 async def process_test_photo(callback_query: types.CallbackQuery):
-    await bot.answer_callback_query(callback_query.id, text="📸 Отправляю тестовое сообщение...")
+    await bot.answer_callback_query(callback_query.id, text="📸 Отправляю тест...")
     
     previous_rates = load_previous_rates()
     rates = await fetch_exchange_rates()
@@ -395,7 +670,7 @@ async def process_test_photo(callback_query: types.CallbackQuery):
     else:
         await bot.send_message(
             callback_query.from_user.id,
-            "❌ Не удалось получить курсы валют",
+            "❌ Не удалось получить курсы",
             parse_mode=types.ParseMode.HTML
         )
 
@@ -406,69 +681,77 @@ async def process_disable_photo(callback_query: types.CallbackQuery):
     await bot.answer_callback_query(callback_query.id, text="✅ Фото отключено")
     await bot.send_message(
         callback_query.from_user.id,
-        "✅ Фото отключено. Теперь сообщения будут отправляться без фото.",
+        "✅ Фото отключено. Сообщения будут без фото.",
         parse_mode=types.ParseMode.HTML
     )
 
 @dp.callback_query_handler(lambda c: c.data == 'check_photo')
 async def process_check_photo(callback_query: types.CallbackQuery):
-    status = "🟢 Включено" if photo_settings['use_photo'] else "🔴 Выключено"
+    status = "🟢 ВКЛ" if photo_settings['use_photo'] else "🔴 ВЫКЛ"
     photo_type = ""
+    
     if photo_settings.get('photo_file_id'):
-        photo_type = "📸 (по file_id)"
+        photo_type = "📸 (из Telegram)"
     elif photo_settings.get('photo_path'):
-        photo_type = f"📁 (путь: {photo_settings['photo_path']})"
+        exists = "✅" if os.path.exists(photo_settings['photo_path']) else "❌"
+        photo_type = f"📁 {exists} {photo_settings['photo_path']}"
     elif photo_settings.get('photo_url'):
-        photo_type = f"🌐 (URL: {photo_settings['photo_url'][:50]}...)"
+        photo_type = f"🌐 {photo_settings['photo_url'][:50]}..."
     
     await bot.answer_callback_query(callback_query.id)
     await bot.send_message(
         callback_query.from_user.id,
-        f"📸 <b>СТАТУС ФОТО</b>\n\n"
-        f"Статус: {status}\n"
-        f"{photo_type}\n\n"
-        f"Используйте /admin для настройки",
+        f"""
+📸 <b>СТАТУС ФОТО</b>
+
+Статус: {status}
+{photo_type}
+
+Используйте /admin для настройки
+        """,
         parse_mode=types.ParseMode.HTML
     )
 
 @dp.message_handler(commands=['start'])
 async def cmd_start(message: types.Message):
-    welcome_text = (
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        "     💎 <b>NT SHIPPING CO</b>     \n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        
-        "👋 <b>Добро пожаловать!</b>\n\n"
-        
-        "Я бот для отслеживания официальных курсов валют\n"
-        "<b>Центрального Банка Российской Федерации</b>\n\n"
-        
-        "📊 <b>МОИ ВОЗМОЖНОСТИ:</b>\n"
-        "• Ежедневная рассылка в 8:00 МСК\n"
-        "• 📈 Тренды и динамика изменений\n"
-        "• 🎨 Красивый интерфейс\n"
-        "• 📸 Поддержка фото\n"
-        "• 🔄 Мгновенное обновление\n\n"
-        
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        "     <b>ДОСТУПНЫЕ КОМАНДЫ</b>     \n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        
-        "💰 /rates - Получить курсы сейчас\n"
-        "📈 /trends - История изменений\n"
-        "ℹ️ /help - Подробная инструкция\n"
-        "👤 /about - О боте\n"
-        "⚙️ /admin - Настройки (для админов)\n\n"
-        
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        "     💎 NT SHIPPING CO     \n"
-        "━━━━━━━━━━━━━━━━━━━━━━"
-    )
+    stats['users_count'].add(message.from_user.id)
+    stats['total_requests'] += 1
+    save_stats()
     
-    keyboard = InlineKeyboardMarkup(row_width=2)
-    keyboard.add(
-        InlineKeyboardButton(text="💰 Курсы", callback_data="refresh_rates"),
-        InlineKeyboardButton(text="📈 Графики", url="https://www.cbr.ru/currency_base/dynamics/")
+    welcome_text = """
+╔════════════════════════════════╗
+║     💎 <b>NT SHIPPING CO</b> 💎     ║
+╠════════════════════════════════╣
+║         👋 ДОБРО ПОЖАЛОВАТЬ!       ║
+╠════════════════════════════════╣
+║  📊 Официальные курсы валют     ║
+║  💵 Центрального Банка РФ       ║
+╠════════════════════════════════╣
+║  <b>⚡ ВОЗМОЖНОСТИ:</b>               ║
+║                                ║
+║  ✅ Ежедневная рассылка в 8:00  ║
+║  ✅ Красивое оформление         ║
+║  ✅ Тренды и аналитика          ║
+║  ✅ История за 30 дней          ║
+║  ✅ Прогнозы и статистика       ║
+║  ✅ Поддержка фото              ║
+╠════════════════════════════════╣
+║  <b>📋 КОМАНДЫ:</b>                  ║
+║                                ║
+║  💰 /rates - Курсы сейчас      ║
+║  📈 /trends - История          ║
+║  📊 /analytics - Аналитика     ║
+║  ℹ️ /help - Инструкция         ║
+║  👤 /about - О боте            ║
+║  ⚙️ /admin - Настройки         ║
+╠════════════════════════════════╣
+║     💎 NT SHIPPING CO 💎       ║
+╚════════════════════════════════╝
+    """
+    
+    keyboard = InlineKeyboardMarkup(row_width=2).add(
+        InlineKeyboardButton(text="💰 КУРСЫ", callback_data="refresh_rates"),
+        InlineKeyboardButton(text="📊 АНАЛИТИКА", callback_data="show_trends")
     )
     
     await message.reply(welcome_text, parse_mode=types.ParseMode.HTML, reply_markup=keyboard)
@@ -479,15 +762,178 @@ async def cmd_admin(message: types.Message):
         await message.reply("⛔ У вас нет доступа к этой команде.")
         return
     
-    admin_text = (
-        "⚙️ <b>АДМИН-ПАНЕЛЬ</b>\n\n"
-        "📸 <b>НАСТРОЙКА ФОТО</b>\n"
-        "Здесь вы можете настроить отображение фото\n"
-        "при отправке курсов валют.\n\n"
-        "Текущий статус: " + ("🟢 Включено" if photo_settings['use_photo'] else "🔴 Выключено")
-    )
+    admin_text = f"""
+╔════════════════════════════════╗
+║     ⚙️ <b>АДМИН-ПАНЕЛЬ</b>       ║
+╠════════════════════════════════╣
+║  📸 Фото: {'ВКЛ' if photo_settings['use_photo'] else 'ВЫКЛ'}                ║
+║  👥 Пользователей: {len(stats['users_count'])}        ║
+║  📨 Отправлено: {stats['total_sent']}          ║
+║  🔄 Запросов: {stats['total_requests']}         ║
+╚════════════════════════════════╝
+    """
     
     await message.reply(admin_text, parse_mode=types.ParseMode.HTML, reply_markup=create_admin_keyboard())
+
+@dp.message_handler(commands=['help'])
+async def cmd_help(message: types.Message):
+    help_text = """
+╔════════════════════════════════╗
+║     📚 <b>ИНСТРУКЦИЯ</b>          ║
+╠════════════════════════════════╣
+║  <b>📌 ДОБАВЛЕНИЕ В КАНАЛ</b>     ║
+║                                ║
+║  1. Откройте настройки канала  ║
+║  2. Администраторы → Добавить  ║
+║  3. Найдите @ваш_бот           ║
+║  4. Отметьте "Отправлять"      ║
+║  5. Сохранить                  ║
+╠════════════════════════════════╣
+║  <b>📋 КОМАНДЫ</b>                 ║
+║                                ║
+║  💰 /rates - Курсы сейчас      ║
+║  📈 /trends - История          ║
+║  📊 /analytics - Аналитика     ║
+║  ℹ️ /help - Эта инструкция     ║
+║  👤 /about - О боте            ║
+╠════════════════════════════════╣
+║  <b>😊 ЗНАЧЕНИЯ СМАЙЛИКОВ</b>     ║
+║                                ║
+║  📈 - Рост курса               ║
+║  📉 - Падение курса            ║
+║  ➖ - Без изменений             ║
+║  🟢 - Положительная динамика   ║
+║  🔴 - Отрицательная динамика   ║
+║  ⚪ - Стабильно                 ║
+║  ▲ - Сильный рост              ║
+║  ▼ - Сильное падение           ║
+╠════════════════════════════════╣
+║  📞 <b>ПОДДЕРЖКА</b>               ║
+║  @fuckForensics                ║
+║  https://nt-shipping.ru/       ║
+╚════════════════════════════════╝
+    """
+    
+    keyboard = InlineKeyboardMarkup(row_width=2).add(
+        InlineKeyboardButton(text="👨‍💻 РАЗРАБОТЧИК", url="https://t.me/fuckForensics"),
+        InlineKeyboardButton(text="🌐 САЙТ", url="https://nt-shipping.ru/")
+    )
+    
+    await message.reply(help_text, parse_mode=types.ParseMode.HTML, reply_markup=keyboard)
+
+@dp.message_handler(commands=['about'])
+async def cmd_about(message: types.Message):
+    about_text = """
+╔════════════════════════════════╗
+║     💎 <b>NT SHIPPING CO</b> 💎     ║
+╠════════════════════════════════╣
+║  🤖 <b>О БОТЕ</b>                  ║
+║                                ║
+║  📌 Название: Currency Bot    ║
+║  📌 Версия: 4.0.0             ║
+║  📌 Источник: ЦБ РФ           ║
+║  📌 Обновление: 8:00 МСК      ║
+╠════════════════════════════════╣
+║  <b>📊 ФУНКЦИОНАЛ</b>              ║
+║                                ║
+║  ✅ Авторассылка              ║
+║  ✅ Тренды и аналитика        ║
+║  ✅ История 30 дней           ║
+║  ✅ Прогнозы                  ║
+║  ✅ Красивый интерфейс        ║
+║  ✅ Поддержка фото            ║
+╠════════════════════════════════╣
+║  <b>📅 ИНФОРМАЦИЯ</b>              ║
+║                                ║
+║  👨‍💻 Разработчик: @fuckForensics║
+║  📅 Создан: 01.03.2026        ║
+║  🌐 Сайт: nt-shipping.ru      ║
+║  📊 Канал: @nt_shippingCo     ║
+╚════════════════════════════════╝
+    """
+    
+    keyboard = InlineKeyboardMarkup(row_width=2).add(
+        InlineKeyboardButton(text="🌐 САЙТ", url="https://nt-shipping.ru/"),
+        InlineKeyboardButton(text="📊 КАНАЛ", url="https://t.me/nt_shippingCo")
+    )
+    
+    await message.reply(about_text, parse_mode=types.ParseMode.HTML, reply_markup=keyboard)
+
+@dp.message_handler(commands=['rates'])
+async def cmd_rates(message: types.Message):
+    stats['users_count'].add(message.from_user.id)
+    stats['total_requests'] += 1
+    save_stats()
+    
+    await message.reply("🔄 <i>Получаю курсы...</i>", parse_mode=types.ParseMode.HTML)
+    
+    previous_rates = load_previous_rates()
+    rates = await fetch_exchange_rates()
+    
+    if rates:
+        save_previous_rates(rates)
+        save_rates_history(rates)
+        
+        current_date = datetime.now()
+        message_text = format_rates_message(rates, previous_rates, current_date)
+        keyboard = create_rates_keyboard()
+        
+        await send_rates_with_photo(message.chat.id, message_text, keyboard)
+    else:
+        await message.reply(
+            "❌ <b>Не удалось получить курсы</b>\nПопробуйте позже",
+            parse_mode=types.ParseMode.HTML
+        )
+
+@dp.message_handler(commands=['trends'])
+async def cmd_trends(message: types.Message):
+    if rates_history:
+        message_text = format_trends_message(rates_history)
+        await message.reply(message_text, parse_mode=types.ParseMode.HTML)
+    else:
+        await message.reply("❌ Нет данных для отображения истории")
+
+@dp.message_handler(commands=['analytics'])
+async def cmd_analytics(message: types.Message):
+    if not rates_history or len(rates_history) < 2:
+        await message.reply("❌ Недостаточно данных для анализа")
+        return
+    
+    recent = list(rates_history)[-7:]
+    
+    usd_values = [item['rates'].get('USD', 0) for item in recent]
+    eur_values = [item['rates'].get('EUR', 0) for item in recent]
+    cny_values = [item['rates'].get('CNY', 0) for item in recent]
+    
+    usd_avg = sum(usd_values) / len(usd_values)
+    eur_avg = sum(eur_values) / len(eur_values)
+    cny_avg = sum(cny_values) / len(cny_values)
+    
+    analytics_text = f"""
+╔════════════════════════════════╗
+║     📊 <b>АНАЛИТИКА</b>            ║
+╠════════════════════════════════╣
+║  <b>🇺🇸 ДОЛЛАР США</b>               ║
+║  📈 Среднее: {usd_avg:.4f} ₽     ║
+║  📉 Мин: {min(usd_values):.4f} ₽        ║
+║  📈 Макс: {max(usd_values):.4f} ₽        ║
+║  📊 Волат: {max(usd_values)-min(usd_values):.4f} ₽  ║
+║                                ║
+║  <b>🇪🇺 ЕВРО</b>                    ║
+║  📈 Среднее: {eur_avg:.4f} ₽     ║
+║  📉 Мин: {min(eur_values):.4f} ₽        ║
+║  📈 Макс: {max(eur_values):.4f} ₽        ║
+║  📊 Волат: {max(eur_values)-min(eur_values):.4f} ₽  ║
+║                                ║
+║  <b>🇨🇳 КИТАЙСКИЙ ЮАНЬ</b>          ║
+║  📈 Среднее: {cny_avg:.4f} ₽     ║
+║  📉 Мин: {min(cny_values):.4f} ₽        ║
+║  📈 Макс: {max(cny_values):.4f} ₽        ║
+║  📊 Волат: {max(cny_values)-min(cny_values):.4f} ₽  ║
+╚════════════════════════════════╝
+    """
+    
+    await message.reply(analytics_text, parse_mode=types.ParseMode.HTML)
 
 @dp.message_handler(commands=['set_photo_path'])
 async def cmd_set_photo_path(message: types.Message):
@@ -496,7 +942,7 @@ async def cmd_set_photo_path(message: types.Message):
     
     path = message.get_args().strip()
     if not path:
-        await message.reply("❌ Укажите путь к файлу: /set_photo_path /путь/к/фото.jpg")
+        await message.reply("❌ Укажите путь: /set_photo_path /путь/к/фото.jpg")
         return
     
     if os.path.exists(path):
@@ -505,9 +951,9 @@ async def cmd_set_photo_path(message: types.Message):
         photo_settings['photo_url'] = ''
         photo_settings['photo_file_id'] = ''
         save_photo_settings()
-        await message.reply(f"✅ Путь к фото сохранен: {path}\nФото будет использоваться при рассылке.")
+        await message.reply(f"✅ Путь сохранен: {path}\nФото будет использоваться!")
     else:
-        await message.reply("❌ Файл не найден по указанному пути.")
+        await message.reply("❌ Файл не найден")
 
 @dp.message_handler(commands=['set_photo_url'])
 async def cmd_set_photo_url(message: types.Message):
@@ -516,7 +962,7 @@ async def cmd_set_photo_url(message: types.Message):
     
     url = message.get_args().strip()
     if not url:
-        await message.reply("❌ Укажите URL фото: /set_photo_url https://example.com/photo.jpg")
+        await message.reply("❌ Укажите URL: /set_photo_url https://example.com/photo.jpg")
         return
     
     photo_settings['use_photo'] = True
@@ -524,7 +970,7 @@ async def cmd_set_photo_url(message: types.Message):
     photo_settings['photo_path'] = ''
     photo_settings['photo_file_id'] = ''
     save_photo_settings()
-    await message.reply(f"✅ URL фото сохранен\nФото будет использоваться при рассылке.")
+    await message.reply(f"✅ URL сохранен\nФото будет использоваться!")
 
 @dp.message_handler(content_types=['photo'])
 async def handle_photo(message: types.Message):
@@ -534,17 +980,16 @@ async def handle_photo(message: types.Message):
         photo_settings['photo_path'] = ''
         photo_settings['photo_url'] = ''
         save_photo_settings()
-        await message.reply("✅ Фото сохранено! Теперь оно будет использоваться при рассылке курсов.")
+        await message.reply("✅ Фото сохранено! Будет использоваться при рассылке.")
     
     if message.caption and '/rates' in message.caption:
-        await message.reply("🔄 <i>Получаю курсы валют для вашего фото...</i>", parse_mode=types.ParseMode.HTML)
+        await message.reply("🔄 <i>Получаю курсы...</i>", parse_mode=types.ParseMode.HTML)
         
         previous_rates = load_previous_rates()
         rates = await fetch_exchange_rates()
         
         if rates:
             save_previous_rates(rates)
-            
             current_date = datetime.now()
             message_text = format_rates_message(rates, previous_rates, current_date)
             keyboard = create_rates_keyboard()
@@ -556,219 +1001,15 @@ async def handle_photo(message: types.Message):
                 parse_mode=types.ParseMode.HTML
             )
 
-@dp.message_handler(commands=['help'])
-async def cmd_help(message: types.Message):
-    help_text = (
-        "📚 <b>ПОДРОБНАЯ ИНСТРУКЦИЯ</b>\n\n"
-        
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        "🔹 <b>ДОБАВЛЕНИЕ В КАНАЛ</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        
-        "1️⃣ Откройте ваш канал\n"
-        "2️⃣ Нажмите на название канала\n"
-        "3️⃣ Выберите «Управление каналом»\n"
-        "4️⃣ Нажмите «Администраторы»\n"
-        "5️⃣ «Добавить администратора»\n"
-        "6️⃣ Найдите @ваш_бот\n"
-        "7️⃣ Отметьте ✓ «Отправлять сообщения»\n"
-        "8️⃣ Нажмите «Сохранить»\n\n"
-        
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        "🔹 <b>ДОСТУПНЫЕ КОМАНДЫ</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        
-        "💰 /rates - Получить курсы\n"
-        "📈 /trends - История изменений\n"
-        "ℹ️ /help - Эта инструкция\n"
-        "👤 /about - О боте\n"
-        "⚙️ /admin - Настройки (админ)\n\n"
-        
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        "🔹 <b>ЗНАЧЕНИЯ СМАЙЛИКОВ</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        
-        "📈 <b>Рост</b> - курс вырос\n"
-        "📉 <b>Падение</b> - курс упал\n"
-        "➖ <b>Стабильно</b> - без изменений\n"
-        "🔄 <b>Нет данных</b> - первое получение\n"
-        "🟢 <b>Рост</b> - положительная динамика\n"
-        "🔴 <b>Падение</b> - отрицательная динамика\n"
-        "⚪ <b>Стабильно</b> - без изменений\n\n"
-        
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        "🔹 <b>КОНТАКТЫ</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        
-        "👨‍💻 Разработчик: @fuckForensics\n"
-        "🌐 Сайт: https://nt-shipping.ru/\n"
-        "📊 Канал: @nt_shippingCo\n\n"
-        
-        "━━━━━━━━━━━━━━━━━━━━━━"
-    )
-    
-    keyboard = InlineKeyboardMarkup(row_width=2)
-    keyboard.add(
-        InlineKeyboardButton(text="👨‍💻 Разработчик", url="https://t.me/fuckForensics"),
-        InlineKeyboardButton(text="🌐 Сайт", url="https://nt-shipping.ru/")
-    )
-    
-    await message.reply(help_text, parse_mode=types.ParseMode.HTML, reply_markup=keyboard, disable_web_page_preview=True)
-
-@dp.message_handler(commands=['about'])
-async def cmd_about(message: types.Message):
-    about_text = (
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        "     💎 <b>NT SHIPPING CO</b>     \n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        
-        "🤖 <b>О БОТЕ</b>\n\n"
-        
-        "📌 <b>Название:</b> Currency Rate Bot\n"
-        "📌 <b>Версия:</b> 3.0.0\n"
-        "📌 <b>Источник:</b> Центральный Банк РФ\n"
-        "📌 <b>Обновление:</b> Ежедневно в 8:00 МСК\n\n"
-        
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        "📊 <b>ФУНКЦИОНАЛ</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        
-        "• ✅ Автоматическая рассылка\n"
-        "• 📈 Отображение трендов\n"
-        "• 📉 Сравнение с прошлым днём\n"
-        "• 🎨 Красивый интерфейс\n"
-        "• 📸 Поддержка фото\n"
-        "• 🔄 Интерактивные кнопки\n"
-        "• 🌐 Ссылки на графики\n\n"
-        
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        "📅 <b>ИНФОРМАЦИЯ</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        
-        "👨‍💻 <b>Разработчик:</b> @fuckForensics\n"
-        "📅 <b>Создан:</b> 01.03.2026\n"
-        "🌐 <b>Сайт:</b> https://nt-shipping.ru/\n"
-        "📊 <b>Канал:</b> @nt_shippingCo\n\n"
-        
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        "     💎 NT SHIPPING CO     \n"
-        "━━━━━━━━━━━━━━━━━━━━━━"
-    )
-    
-    keyboard = InlineKeyboardMarkup(row_width=2)
-    keyboard.add(
-        InlineKeyboardButton(text="🌐 Сайт", url="https://nt-shipping.ru/"),
-        InlineKeyboardButton(text="📊 Канал", url="https://t.me/nt_shippingCo")
-    )
-    
-    await message.reply(about_text, parse_mode=types.ParseMode.HTML, reply_markup=keyboard)
-
-@dp.message_handler(commands=['trends'])
-async def cmd_trends(message: types.Message):
-    previous_rates = load_previous_rates()
-    current_rates = await fetch_exchange_rates()
-    
-    if current_rates and previous_rates:
-        trends_text = (
-            "━━━━━━━━━━━━━━━━━━━━━━\n"
-            "     📊 <b>ИСТОРИЯ ИЗМЕНЕНИЙ</b>     \n"
-            "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        )
-        
-        for currency in ['USD', 'EUR', 'CNY']:
-            current = current_rates.get(currency, 0)
-            previous = previous_rates.get(currency, 0)
-            change = current - previous
-            percent = (change / previous * 100) if previous != 0 else 0
-            
-            emoji = get_trend_emoji(current, previous)
-            change_emoji = "🟢" if change > 0 else "🔴" if change < 0 else "⚪"
-            
-            currency_symbols = {
-                'USD': '🇺🇸 ДОЛЛАР США',
-                'EUR': '🇪🇺 ЕВРО',
-                'CNY': '🇨🇳 КИТАЙСКИЙ ЮАНЬ'
-            }
-            
-            trends_text += (
-                f"<b>{currency_symbols[currency]}</b>\n"
-                f"┌─────────────────────┐\n"
-                f"│ {emoji} Текущий: {current:.4f} ₽\n"
-                f"│ 📊 Прошлый: {previous:.4f} ₽\n"
-                f"│ {change_emoji} Изменение: {change:+.4f} ₽\n"
-                f"│ 📈 Процент: {percent:+.2f}%\n"
-                f"└─────────────────────┘\n\n"
-            )
-        
-        trends_text += "━━━━━━━━━━━━━━━━━━━━━━\n     💎 NT SHIPPING CO     \n━━━━━━━━━━━━━━━━━━━━━━"
-        
-        await message.reply(trends_text, parse_mode=types.ParseMode.HTML)
-    else:
-        await message.reply("❌ Недостаточно данных для отображения трендов.")
-
-@dp.message_handler(commands=['rates'])
-async def cmd_rates(message: types.Message):
-    await message.reply("🔄 <i>Получаю актуальные курсы валют...</i>", parse_mode=types.ParseMode.HTML)
-    
-    previous_rates = load_previous_rates()
-    rates = await fetch_exchange_rates()
-    
-    if rates:
-        save_previous_rates(rates)
-        
-        current_date = datetime.now()
-        message_text = format_rates_message(rates, previous_rates, current_date)
-        keyboard = create_rates_keyboard()
-        
-        await send_rates_with_photo(message.chat.id, message_text, keyboard)
-    else:
-        await message.reply(
-            "❌ <b>Не удалось получить курсы валют.</b>\nПопробуйте позже или проверьте соединение.",
-            parse_mode=types.ParseMode.HTML
-        )
-
-@dp.message_handler(commands=['settime'])
-async def cmd_settime(message: types.Message):
-    if message.from_user.id not in ADMIN_IDS:
-        await message.reply("⛔ У вас нет прав на выполнение этой команды.")
-        return
-    
-    args = message.get_args()
-    if not args:
-        await message.reply(
-            "❌ Укажите время в формате ЧЧ:ММ\n"
-            "Пример: /settime 09:30"
-        )
-        return
-    
-    try:
-        hour, minute = map(int, args.split(':'))
-        if 0 <= hour <= 23 and 0 <= minute <= 59:
-            scheduler.reschedule_job(
-                job_id='daily_rates',
-                trigger='cron',
-                hour=hour,
-                minute=minute
-            )
-            await message.reply(
-                f"✅ Время рассылки изменено на {hour:02d}:{minute:02d} МСК",
-                parse_mode=types.ParseMode.HTML
-            )
-        else:
-            await message.reply("❌ Неверный формат времени.")
-    except:
-        await message.reply("❌ Неверный формат. Используйте ЧЧ:ММ")
-
 async def on_startup(dp):
-    logger.info("🚀 Бот запускается...")
+    logger.info("🚀 ЗАПУСК БОТА...")
     
     load_photo_settings()
-    previous_rates = load_previous_rates()
-    if previous_rates:
-        logger.info(f"📊 Загружены предыдущие курсы: {previous_rates}")
+    load_rates_history()
+    load_stats()
     
-    if photo_settings['use_photo']:
-        logger.info(f"📸 Режим фото: ВКЛЮЧЕН")
+    logger.info(f"📊 Загружено: {len(rates_history)} записей истории")
+    logger.info(f"👥 Пользователей: {len(stats['users_count'])}")
     
     scheduler.add_job(
         send_daily_rates,
@@ -779,26 +1020,30 @@ async def on_startup(dp):
         replace_existing=True
     )
     scheduler.start()
-    logger.info("⏰ Планировщик запущен. Отправка каждый день в 8:00 МСК")
+    logger.info("⏰ Планировщик: 8:00 МСК")
     
     for admin_id in ADMIN_IDS:
         try:
             await bot.send_message(
                 admin_id,
-                "━━━━━━━━━━━━━━━━━━━━━━\n"
-                "     ✅ <b>БОТ ЗАПУЩЕН</b>     \n"
-                "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-                f"⏰ Рассылка: <b>8:00 МСК</b>\n"
-                f"📊 Канал: <b>{CHAT_ID}</b>\n"
-                f"📸 Фото: <b>{'ВКЛ' if photo_settings['use_photo'] else 'ВЫКЛ'}</b>\n\n"
-                "━━━━━━━━━━━━━━━━━━━━━━",
+                f"""
+╔════════════════════════════════╗
+║     ✅ <b>БОТ ЗАПУЩЕН</b>         ║
+╠════════════════════════════════╣
+║  ⏰ Рассылка: 8:00 МСК         ║
+║  📊 Канал: {CHAT_ID}           ║
+║  📸 Фото: {'ВКЛ' if photo_settings['use_photo'] else 'ВЫКЛ'}             ║
+║  👥 Пользователей: {len(stats['users_count'])}     ║
+╚════════════════════════════════╝
+                """,
                 parse_mode=types.ParseMode.HTML
             )
         except Exception as e:
-            logger.error(f"Не удалось отправить уведомление админу {admin_id}: {e}")
+            logger.error(f"Ошибка уведомления админа: {e}")
 
 async def on_shutdown(dp):
-    logger.info("🛑 Бот останавливается...")
+    logger.info("🛑 ОСТАНОВКА БОТА...")
+    save_stats()
     scheduler.shutdown()
     await bot.close()
 
