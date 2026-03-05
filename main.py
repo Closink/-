@@ -441,16 +441,16 @@ def format_trends_message_desktop(history: deque) -> str:
 def create_rates_keyboard_mobile() -> InlineKeyboardMarkup:
     keyboard = InlineKeyboardMarkup(row_width=2)
     keyboard.add(
-        InlineKeyboardButton(text="🔄 ОБН", callback_data="refresh_rates"),
-        InlineKeyboardButton(text="📈 ГРАФ", url="https://www.cbr.ru/currency_base/dynamics/")
+        InlineKeyboardButton(text="🔄 ОБНОВИТЬ", callback_data="refresh_rates"),
+        InlineKeyboardButton(text="📈 ГРАФИК", url="https://www.cbr.ru/currency_base/dynamics/")
     )
     keyboard.add(
-        InlineKeyboardButton(text="📊 ИСТ", callback_data="show_history"),
-        InlineKeyboardButton(text="📉 АНАЛ", callback_data="show_trends")
+        InlineKeyboardButton(text="📊 ИСТОРИЯ", callback_data="show_history"),
+        InlineKeyboardButton(text="📉 АНАЛИТИКА", callback_data="show_trends")
     )
     keyboard.add(
         InlineKeyboardButton(text="💎 САЙТ", url="https://nt-shipping.ru/"),
-        InlineKeyboardButton(text="👨‍💻 ПОД", url="https://t.me/fuckForensics")
+        InlineKeyboardButton(text="👨‍💻 ПОДДЕРЖКА", url="https://t.me/fuckForensics")
     )
     return keyboard
 
