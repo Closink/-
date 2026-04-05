@@ -170,15 +170,15 @@ def get_market_status(rates: dict, previous: dict) -> dict:
     down_count = sum(1 for x in [usd_change, eur_change, cny_change] if x < 0)
     
     if up_count == 3:
-        return {"status": "🚀 ВСЕ РАСТЕТ", "color": "🟢", "desc": "Все валюты дорожают"}
+        return {"status": "🚀 ВСЕ РАСТЕТ", "desc": "Все валюты дорожают"}
     elif down_count == 3:
-        return {"status": "📉 ВСЕ ПАДАЕТ", "color": "🔴", "desc": "Все валюты дешевеют"}
+        return {"status": "📉 ВСЕ ПАДАЕТ", "desc": "Все валюты дешевеют"}
     elif up_count > down_count:
-        return {"status": "📊 БОЛЬШЕ РОСТА", "color": "🟡", "desc": "Преимущественно рост"}
+        return {"status": "📊 БОЛЬШЕ РОСТА", "desc": "Преимущественно рост"}
     elif down_count > up_count:
-        return {"status": "📊 БОЛЬШЕ ПАДЕНИЯ", "color": "🟠", "desc": "Преимущественно падение"}
+        return {"status": "📊 БОЛЬШЕ ПАДЕНИЯ", "desc": "Преимущественно падение"}
     else:
-        return {"status": "⚖️ СМЕШАННО", "color": "⚪", "desc": "Разнонаправленное движение"}
+        return {"status": "⚖️ СМЕШАННО", "desc": "Разнонаправленное движение"}
 
 def get_random_greeting():
     morning_greetings = [
@@ -219,9 +219,6 @@ def create_progress_bar(value: float, min_val: float, max_val: float, length: in
     
     bar = "█" * position + "░" * (length - position)
     return bar
-
-def is_mobile(chat_id: int) -> bool:
-    return True
 
 async def fetch_exchange_rates() -> dict:
     try:
@@ -277,7 +274,7 @@ def format_rates_message_mobile(rates: dict, previous_rates: dict, date: datetim
 ╠════════════════════╣
 ║ {get_random_greeting()} ║
 ╠════════════════════╣
-║  📊 КУРСЫ {market['color']}  ║
+║  📊 КУРСЫ ЦБ РФ   ║
 ╠════════════════════╣
 ║🇺🇸 <b>USD</b> {usd_trend}{usd_arrow}    ║
 ║<code>{rates.get('USD', 0):.4f}</code> ₽       ║
@@ -294,67 +291,13 @@ def format_rates_message_mobile(rates: dict, previous_rates: dict, date: datetim
 ║{get_change_emoji(cny_change)} {format_change(cny_change)}║
 ║{create_progress_bar(rates.get('CNY', 0), 10, 15)}║
 ╠════════════════════╣
-║{market['status']}║
+║{market['status']}   ║
+║{market['desc']}     ║
 ╠════════════════════╣
-║💬 {motivation}║
+║💬 {motivation}      ║
 ╠════════════════════╣
 ║    💎NT SHIPPING💎  ║
 ╚════════════════════╝
-"""
-    return message
-
-def format_rates_message_desktop(rates: dict, previous_rates: dict, date: datetime) -> str:
-    date_str = date.strftime("%d.%m.%Y")
-    time_str = date.strftime("%H:%M")
-    
-    usd_change = rates.get('USD', 0) - previous_rates.get('USD', 0)
-    eur_change = rates.get('EUR', 0) - previous_rates.get('EUR', 0)
-    cny_change = rates.get('CNY', 0) - previous_rates.get('CNY', 0)
-    
-    usd_trend = get_trend_emoji(rates.get('USD', 0), previous_rates.get('USD', 0))
-    eur_trend = get_trend_emoji(rates.get('EUR', 0), previous_rates.get('EUR', 0))
-    cny_trend = get_trend_emoji(rates.get('CNY', 0), previous_rates.get('CNY', 0))
-    
-    usd_arrow = get_trend_arrow(rates.get('USD', 0), previous_rates.get('USD', 0))
-    eur_arrow = get_trend_arrow(rates.get('EUR', 0), previous_rates.get('EUR', 0))
-    cny_arrow = get_trend_arrow(rates.get('CNY', 0), previous_rates.get('CNY', 0))
-    
-    market = get_market_status(rates, previous_rates)
-    motivation = get_motivation()
-    
-    message = f"""
-╔════════════════════════════════════════╗
-║         💎 NT SHIPPING CO 💎           ║
-╠════════════════════════════════════════╣
-║     {get_weather_emoji()} {date_str}  🕐 {time_str} МСК      ║
-╠════════════════════════════════════════╣
-║            {get_random_greeting()}              ║
-╠════════════════════════════════════════╣
-║        📊 КУРСЫ ЦБ РФ  {market['color']}         ║
-╠════════════════════════════════════════╣
-║                                            ║
-║  🇺🇸 <b>ДОЛЛАР США</b>                          ║
-║  <code>{rates.get('USD', 0):>12.4f}</code> ₽ {usd_trend} {usd_arrow}              ║
-║  {get_change_emoji(usd_change)} Изм: {format_change(usd_change)}                ║
-║  {create_progress_bar(rates.get('USD', 0), 70, 100, 12)}    ║
-║                                            ║
-║  🇪🇺 <b>ЕВРО</b>                                 ║
-║  <code>{rates.get('EUR', 0):>12.4f}</code> ₽ {eur_trend} {eur_arrow}              ║
-║  {get_change_emoji(eur_change)} Изм: {format_change(eur_change)}                ║
-║  {create_progress_bar(rates.get('EUR', 0), 80, 110, 12)}    ║
-║                                            ║
-║  🇨🇳 <b>КИТАЙСКИЙ ЮАНЬ</b>                      ║
-║  <code>{rates.get('CNY', 0):>12.4f}</code> ₽ {cny_trend} {cny_arrow}              ║
-║  {get_change_emoji(cny_change)} Изм: {format_change(cny_change)}                ║
-║  {create_progress_bar(rates.get('CNY', 0), 10, 15, 12)}    ║
-║                                            ║
-╠════════════════════════════════════════╣
-║  {market['status']}  {market['desc']}  ║
-╠════════════════════════════════════════╣
-║  💬 <i>"{motivation}"</i>  ║
-╠════════════════════════════════════════╣
-║           💎 NT SHIPPING CO 💎           ║
-╚════════════════════════════════════════╝
 """
     return message
 
@@ -390,86 +333,6 @@ def format_trends_message_mobile(history: deque) -> str:
 """
     return message
 
-def format_trends_message_desktop(history: deque) -> str:
-    if not history:
-        return "❌ Нет данных для анализа"
-    
-    recent = list(history)[-7:]
-    
-    message = """
-╔════════════════════════════════════════╗
-║        📊 ИСТОРИЯ ЗА 7 ДНЕЙ            ║
-╠════════════════════════════════════════╣
-║  Дата    │   USD   │   EUR   │   CNY   ║
-╠════════════════════════════════════════╣
-"""
-    
-    for item in recent:
-        date = item['date'].strftime("%d.%m")
-        usd = item['rates'].get('USD', 0)
-        eur = item['rates'].get('EUR', 0)
-        cny = item['rates'].get('CNY', 0)
-        
-        message += f"║ {date}  │ {usd:.2f}  │ {eur:.2f}  │ {cny:.2f}  ║\n"
-    
-    if len(recent) >= 2:
-        first_usd = recent[0]['rates'].get('USD', 0)
-        last_usd = recent[-1]['rates'].get('USD', 0)
-        usd_trend = "📈" if last_usd > first_usd else "📉"
-        
-        first_eur = recent[0]['rates'].get('EUR', 0)
-        last_eur = recent[-1]['rates'].get('EUR', 0)
-        eur_trend = "📈" if last_eur > first_eur else "📉"
-        
-        first_cny = recent[0]['rates'].get('CNY', 0)
-        last_cny = recent[-1]['rates'].get('CNY', 0)
-        cny_trend = "📈" if last_cny > first_cny else "📉"
-        
-        message += f"""
-╠════════════════════════════════════════╣
-║  <b>ТРЕНД ЗА НЕДЕЛЮ:</b>                      ║
-║  🇺🇸 USD: {usd_trend}  {last_usd-first_usd:+.2f} ₽              ║
-║  🇪🇺 EUR: {eur_trend}  {last_eur-first_eur:+.2f} ₽              ║
-║  🇨🇳 CNY: {cny_trend}  {last_cny-first_cny:+.2f} ₽              ║
-"""
-    
-    message += """
-╚════════════════════════════════════════╝
-"""
-    return message
-
-def create_rates_keyboard_mobile() -> InlineKeyboardMarkup:
-    keyboard = InlineKeyboardMarkup(row_width=2)
-    keyboard.add(
-        InlineKeyboardButton(text="🔄 ОБНОВИТЬ", callback_data="refresh_rates"),
-        InlineKeyboardButton(text="📈 ГРАФИК", url="https://www.cbr.ru/currency_base/dynamics/")
-    )
-    keyboard.add(
-        InlineKeyboardButton(text="📊 ИСТОРИЯ", callback_data="show_history"),
-        InlineKeyboardButton(text="📉 АНАЛИТИКА", callback_data="show_trends")
-    )
-    keyboard.add(
-        InlineKeyboardButton(text="💎 САЙТ", url="https://nt-shipping.ru/"),
-        InlineKeyboardButton(text="👨‍💻 ПОДДЕРЖКА", url="https://t.me/fuckForensics")
-    )
-    return keyboard
-
-def create_rates_keyboard_desktop() -> InlineKeyboardMarkup:
-    keyboard = InlineKeyboardMarkup(row_width=2)
-    keyboard.add(
-        InlineKeyboardButton(text="🔄 ОБНОВИТЬ", callback_data="refresh_rates"),
-        InlineKeyboardButton(text="📈 ГРАФИКИ", url="https://www.cbr.ru/currency_base/dynamics/")
-    )
-    keyboard.add(
-        InlineKeyboardButton(text="📊 ИСТОРИЯ", callback_data="show_history"),
-        InlineKeyboardButton(text="📉 ТРЕНДЫ", callback_data="show_trends")
-    )
-    keyboard.add(
-        InlineKeyboardButton(text="💎 САЙТ", url="https://nt-shipping.ru/"),
-        InlineKeyboardButton(text="👨‍💻 ПОДДЕРЖКА", url="https://t.me/fuckForensics")
-    )
-    return keyboard
-
 def create_admin_keyboard() -> InlineKeyboardMarkup:
     keyboard = InlineKeyboardMarkup(row_width=1)
     keyboard.add(
@@ -489,7 +352,7 @@ def create_admin_keyboard() -> InlineKeyboardMarkup:
     )
     return keyboard
 
-async def send_rates_with_photo(chat_id: str, message_text: str, keyboard: InlineKeyboardMarkup, is_mobile_device: bool = True):
+async def send_rates_with_photo(chat_id: str, message_text: str):
     try:
         if photo_settings['use_photo']:
             if photo_settings.get('photo_file_id'):
@@ -497,7 +360,6 @@ async def send_rates_with_photo(chat_id: str, message_text: str, keyboard: Inlin
                     chat_id=chat_id,
                     photo=photo_settings['photo_file_id'],
                     caption=message_text,
-                    reply_markup=keyboard,
                     parse_mode=types.ParseMode.HTML
                 )
             elif photo_settings.get('photo_path') and os.path.exists(photo_settings['photo_path']):
@@ -506,7 +368,6 @@ async def send_rates_with_photo(chat_id: str, message_text: str, keyboard: Inlin
                         chat_id=chat_id,
                         photo=photo,
                         caption=message_text,
-                        reply_markup=keyboard,
                         parse_mode=types.ParseMode.HTML
                     )
                     photo_settings['photo_file_id'] = sent_message.photo[-1].file_id
@@ -516,21 +377,18 @@ async def send_rates_with_photo(chat_id: str, message_text: str, keyboard: Inlin
                     chat_id=chat_id,
                     photo=photo_settings['photo_url'],
                     caption=message_text,
-                    reply_markup=keyboard,
                     parse_mode=types.ParseMode.HTML
                 )
             else:
                 await bot.send_message(
                     chat_id=chat_id,
                     text=message_text,
-                    reply_markup=keyboard,
                     parse_mode=types.ParseMode.HTML
                 )
         else:
             await bot.send_message(
                 chat_id=chat_id,
                 text=message_text,
-                reply_markup=keyboard,
                 parse_mode=types.ParseMode.HTML
             )
     except Exception as e:
@@ -538,7 +396,6 @@ async def send_rates_with_photo(chat_id: str, message_text: str, keyboard: Inlin
         await bot.send_message(
             chat_id=chat_id,
             text=message_text + "\n\n⚠️ Ошибка фото",
-            reply_markup=keyboard,
             parse_mode=types.ParseMode.HTML
         )
 
@@ -550,12 +407,7 @@ async def send_daily_rates():
     
     if rates:
         current_date = datetime.now()
-        
-        message_text_mobile = format_rates_message_mobile(rates, previous_rates, current_date)
-        message_text_desktop = format_rates_message_desktop(rates, previous_rates, current_date)
-        
-        keyboard_mobile = create_rates_keyboard_mobile()
-        keyboard_desktop = create_rates_keyboard_desktop()
+        message_text = format_rates_message_mobile(rates, previous_rates, current_date)
         
         try:
             save_previous_rates(rates)
@@ -565,7 +417,7 @@ async def send_daily_rates():
             stats['last_update'] = current_date
             save_stats()
             
-            await send_rates_with_photo(CHAT_ID, message_text_mobile, keyboard_mobile, True)
+            await send_rates_with_photo(CHAT_ID, message_text)
             logger.info("✅ Курсы успешно отправлены")
         except Exception as e:
             logger.error(f"❌ Ошибка при отправке: {e}")
@@ -579,114 +431,6 @@ async def send_daily_rates():
             )
         except:
             pass
-
-@dp.callback_query_handler(lambda c: c.data == 'refresh_rates')
-async def process_refresh_callback(callback_query: types.CallbackQuery):
-    await bot.answer_callback_query(callback_query.id, text="🔄 Обновляю...")
-    
-    previous_rates = load_previous_rates()
-    rates = await fetch_exchange_rates()
-    
-    if rates:
-        current_date = datetime.now()
-        message_text = format_rates_message_mobile(rates, previous_rates, current_date)
-        keyboard = create_rates_keyboard_mobile()
-        
-        try:
-            await bot.edit_message_text(
-                chat_id=callback_query.message.chat.id,
-                message_id=callback_query.message.message_id,
-                text=message_text,
-                reply_markup=keyboard,
-                parse_mode=types.ParseMode.HTML
-            )
-            await bot.answer_callback_query(callback_query.id, text="✅ Обновлено!")
-        except Exception as e:
-            await bot.answer_callback_query(callback_query.id, text="❌ Ошибка")
-    else:
-        await bot.answer_callback_query(callback_query.id, text="❌ Ошибка получения")
-
-@dp.callback_query_handler(lambda c: c.data == 'show_history')
-async def process_history_callback(callback_query: types.CallbackQuery):
-    await bot.answer_callback_query(callback_query.id, text="📊 Загружаю...")
-    
-    if rates_history:
-        message_text = format_trends_message_mobile(rates_history)
-        keyboard = InlineKeyboardMarkup().add(
-            InlineKeyboardButton(text="◀️ НАЗАД", callback_data="back_to_rates")
-        )
-        
-        await bot.edit_message_text(
-            chat_id=callback_query.message.chat.id,
-            message_id=callback_query.message.message_id,
-            text=message_text,
-            reply_markup=keyboard,
-            parse_mode=types.ParseMode.HTML
-        )
-    else:
-        await bot.answer_callback_query(callback_query.id, text="❌ Нет данных")
-
-@dp.callback_query_handler(lambda c: c.data == 'show_trends')
-async def process_trends_callback(callback_query: types.CallbackQuery):
-    await bot.answer_callback_query(callback_query.id, text="📉 Анализирую...")
-    
-    if rates_history and len(rates_history) >= 2:
-        recent = list(rates_history)[-5:]
-        
-        usd_values = [item['rates'].get('USD', 0) for item in recent]
-        eur_values = [item['rates'].get('EUR', 0) for item in recent]
-        cny_values = [item['rates'].get('CNY', 0) for item in recent]
-        
-        trends_text = f"""
-╔════════════════════╗
-║    📉 АНАЛИТИКА   ║
-╠════════════════════╣
-║🇺🇸 USD            ║
-║↓{min(usd_values):.2f} ↑{max(usd_values):.2f}₽║
-║📊 {max(usd_values)-min(usd_values):.2f}₽     ║
-║                    ║
-║🇪🇺 EUR            ║
-║↓{min(eur_values):.2f} ↑{max(eur_values):.2f}₽║
-║📊 {max(eur_values)-min(eur_values):.2f}₽     ║
-║                    ║
-║🇨🇳 CNY            ║
-║↓{min(cny_values):.2f} ↑{max(cny_values):.2f}₽║
-║📊 {max(cny_values)-min(cny_values):.2f}₽     ║
-╚════════════════════╝
-"""
-        keyboard = InlineKeyboardMarkup().add(
-            InlineKeyboardButton(text="◀️ НАЗАД", callback_data="back_to_rates")
-        )
-        
-        await bot.edit_message_text(
-            chat_id=callback_query.message.chat.id,
-            message_id=callback_query.message.message_id,
-            text=trends_text,
-            reply_markup=keyboard,
-            parse_mode=types.ParseMode.HTML
-        )
-    else:
-        await bot.answer_callback_query(callback_query.id, text="❌ Мало данных")
-
-@dp.callback_query_handler(lambda c: c.data == 'back_to_rates')
-async def process_back_callback(callback_query: types.CallbackQuery):
-    await bot.answer_callback_query(callback_query.id, text="🔄 Возвращаюсь...")
-    
-    previous_rates = load_previous_rates()
-    rates = await fetch_exchange_rates()
-    
-    if rates:
-        current_date = datetime.now()
-        message_text = format_rates_message_mobile(rates, previous_rates, current_date)
-        keyboard = create_rates_keyboard_mobile()
-        
-        await bot.edit_message_text(
-            chat_id=callback_query.message.chat.id,
-            message_id=callback_query.message.message_id,
-            text=message_text,
-            reply_markup=keyboard,
-            parse_mode=types.ParseMode.HTML
-        )
 
 @dp.callback_query_handler(lambda c: c.data == 'setup_photo')
 async def process_setup_photo(callback_query: types.CallbackQuery):
@@ -734,9 +478,8 @@ async def process_test_photo(callback_query: types.CallbackQuery):
     if rates:
         current_date = datetime.now()
         message_text = format_rates_message_mobile(rates, previous_rates, current_date)
-        keyboard = create_rates_keyboard_mobile()
         
-        await send_rates_with_photo(callback_query.from_user.id, message_text, keyboard, True)
+        await send_rates_with_photo(callback_query.from_user.id, message_text)
         await bot.send_message(
             callback_query.from_user.id,
             "✅ Тест отправлен!",
@@ -778,6 +521,9 @@ async def process_check_photo(callback_query: types.CallbackQuery):
 
 @dp.message_handler(commands=['start'])
 async def cmd_start(message: types.Message):
+    if str(message.chat.id).startswith('-100'):
+        return
+    
     stats['users_count'].add(message.from_user.id)
     stats['total_requests'] += 1
     save_stats()
@@ -807,12 +553,7 @@ async def cmd_start(message: types.Message):
 ╚════════════════════╝
     """
     
-    keyboard = InlineKeyboardMarkup(row_width=2).add(
-        InlineKeyboardButton(text="💰 КУРСЫ", callback_data="refresh_rates"),
-        InlineKeyboardButton(text="📊 АНАЛИТ", callback_data="show_trends")
-    )
-    
-    await message.reply(welcome_text, parse_mode=types.ParseMode.HTML, reply_markup=keyboard)
+    await message.reply(welcome_text, parse_mode=types.ParseMode.HTML)
 
 @dp.message_handler(commands=['admin'])
 async def cmd_admin(message: types.Message):
@@ -858,12 +599,7 @@ async def cmd_help(message: types.Message):
 ╚════════════════════╝
     """
     
-    keyboard = InlineKeyboardMarkup(row_width=2).add(
-        InlineKeyboardButton(text="👨‍💻 ДЕВ", url="https://t.me/fuckForensics"),
-        InlineKeyboardButton(text="🌐 САЙТ", url="https://nt-shipping.ru/")
-    )
-    
-    await message.reply(help_text, parse_mode=types.ParseMode.HTML, reply_markup=keyboard)
+    await message.reply(help_text, parse_mode=types.ParseMode.HTML)
 
 @dp.message_handler(commands=['about'])
 async def cmd_about(message: types.Message):
@@ -887,15 +623,13 @@ async def cmd_about(message: types.Message):
 ╚════════════════════╝
     """
     
-    keyboard = InlineKeyboardMarkup(row_width=2).add(
-        InlineKeyboardButton(text="🌐 САЙТ", url="https://nt-shipping.ru/"),
-        InlineKeyboardButton(text="📊 КАНАЛ", url="https://t.me/nt_shippingCo")
-    )
-    
-    await message.reply(about_text, parse_mode=types.ParseMode.HTML, reply_markup=keyboard)
+    await message.reply(about_text, parse_mode=types.ParseMode.HTML)
 
 @dp.message_handler(commands=['rates'])
 async def cmd_rates(message: types.Message):
+    if str(message.chat.id).startswith('-100'):
+        return
+    
     stats['users_count'].add(message.from_user.id)
     stats['total_requests'] += 1
     save_stats()
@@ -911,14 +645,16 @@ async def cmd_rates(message: types.Message):
         
         current_date = datetime.now()
         message_text = format_rates_message_mobile(rates, previous_rates, current_date)
-        keyboard = create_rates_keyboard_mobile()
         
-        await send_rates_with_photo(message.chat.id, message_text, keyboard, True)
+        await send_rates_with_photo(message.chat.id, message_text)
     else:
         await message.reply("❌ Ошибка получения", parse_mode=types.ParseMode.HTML)
 
 @dp.message_handler(commands=['trends'])
 async def cmd_trends(message: types.Message):
+    if str(message.chat.id).startswith('-100'):
+        return
+    
     if rates_history:
         message_text = format_trends_message_mobile(rates_history)
         await message.reply(message_text, parse_mode=types.ParseMode.HTML)
@@ -927,6 +663,9 @@ async def cmd_trends(message: types.Message):
 
 @dp.message_handler(commands=['analytics'])
 async def cmd_analytics(message: types.Message):
+    if str(message.chat.id).startswith('-100'):
+        return
+    
     if not rates_history or len(rates_history) < 2:
         await message.reply("❌ Мало данных")
         return
@@ -1005,6 +744,9 @@ async def handle_photo(message: types.Message):
         await message.reply("✅ Фото сохранено!")
     
     if message.caption and '/rates' in message.caption:
+        if str(message.chat.id).startswith('-100'):
+            return
+        
         await message.reply("🔄 Получаю...", parse_mode=types.ParseMode.HTML)
         
         previous_rates = load_previous_rates()
@@ -1014,12 +756,10 @@ async def handle_photo(message: types.Message):
             save_previous_rates(rates)
             current_date = datetime.now()
             message_text = format_rates_message_mobile(rates, previous_rates, current_date)
-            keyboard = create_rates_keyboard_mobile()
             
             await message.reply_photo(
                 photo=message.photo[-1].file_id,
                 caption=message_text,
-                reply_markup=keyboard,
                 parse_mode=types.ParseMode.HTML
             )
 
