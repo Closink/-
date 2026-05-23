@@ -1,65 +1,60 @@
-import asyncio
 import logging
 import os
-from datetime import datetime, timedelta
+from datetime import datetime
 from xml.etree import ElementTree
-from typing import Dict, Tuple
 import pickle
-import random
-import json
 from collections import deque
 
 import aiohttp
 from aiogram import Bot, Dispatcher, types
 from aiogram.contrib.middlewares.logging import LoggingMiddleware
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, InputFile
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils import executor
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-TOKEN = "8546494996:AAEh4ylPyN8prRSy0LLr9OE0rZFwggrHEo4"
-CHAT_ID = "-1002129097415"
-ADMIN_IDS = [8186449861]
+TOKEN        = "8546494996:AAEh4ylPyN8prRSy0LLr9OE0rZFwggrHEo4"
+CHAT_ID      = "-1002129097415"
+ADMIN_IDS    = [8186449861]
+CBR_URL      = "https://www.cbr.ru/scripts/XML_daily.asp"
 
-CBR_URL = "https://www.cbr.ru/scripts/XML_daily.asp"
-
-PREVIOUS_RATES_FILE = "previous_rates.pkl"
-PHOTO_SETTINGS_FILE = "photo_settings.pkl"
-HISTORY_FILE = "rates_history.pkl"
-STATS_FILE = "stats.pkl"
+PREVIOUS_RATES_FILE  = "previous_rates.pkl"
+PHOTO_SETTINGS_FILE  = "photo_settings.pkl"
+HISTORY_FILE         = "rates_history.pkl"
+STATS_FILE           = "stats.pkl"
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-bot = Bot(token=TOKEN)
-dp = Dispatcher(bot)
+bot       = Bot(token=TOKEN)
+dp        = Dispatcher(bot)
 dp.middleware.setup(LoggingMiddleware())
 scheduler = AsyncIOScheduler(timezone="Europe/Moscow")
 
 photo_settings = {
-    'use_photo': False,
-    'photo_path': '',
-    'photo_url': '',
+    'use_photo':     False,
+    'photo_path':    '',
+    'photo_url':     '',
     'photo_file_id': ''
 }
 
 stats = {
     'total_requests': 0,
-    'total_sent': 0,
-    'last_update': None,
-    'users_count': set(),
-    'daily_stats': {},
-    'weekly_avg': {}
+    'total_sent':     0,
+    'last_update':    None,
+    'users_count':    set(),
 }
 
 rates_history = deque(maxlen=30)
 
+
 def save_stats():
     try:
-        stats['users_count'] = list(stats['users_count'])
+        data = stats.copy()
+        data['users_count'] = list(stats['users_count'])
         with open(STATS_FILE, 'wb') as f:
-            pickle.dump(stats, f)
+            pickle.dump(data, f)
     except Exception as e:
-        logger.error(f"Ошибка при сохранении статистики: {e}")
+        logger.error(f"Ошибка сохранения статистики: {e}")
 
 def load_stats():
     global stats
@@ -67,21 +62,18 @@ def load_stats():
         if os.path.exists(STATS_FILE):
             with open(STATS_FILE, 'rb') as f:
                 loaded = pickle.load(f)
-                loaded['users_count'] = set(loaded['users_count'])
+                loaded['users_count'] = set(loaded.get('users_count', []))
                 stats.update(loaded)
     except Exception as e:
-        logger.error(f"Ошибка при загрузке статистики: {e}")
+        logger.error(f"Ошибка загрузки статистики: {e}")
 
 def save_rates_history(rates: dict):
     try:
-        rates_history.append({
-            'date': datetime.now(),
-            'rates': rates.copy()
-        })
+        rates_history.append({'date': datetime.now(), 'rates': rates.copy()})
         with open(HISTORY_FILE, 'wb') as f:
             pickle.dump(list(rates_history), f)
     except Exception as e:
-        logger.error(f"Ошибка при сохранении истории: {e}")
+        logger.error(f"Ошибка сохранения истории: {e}")
 
 def load_rates_history():
     global rates_history
@@ -91,14 +83,14 @@ def load_rates_history():
                 data = pickle.load(f)
                 rates_history = deque(data, maxlen=30)
     except Exception as e:
-        logger.error(f"Ошибка при загрузке истории: {e}")
+        logger.error(f"Ошибка загрузки истории: {e}")
 
 def save_photo_settings():
     try:
         with open(PHOTO_SETTINGS_FILE, 'wb') as f:
             pickle.dump(photo_settings, f)
     except Exception as e:
-        logger.error(f"Ошибка при сохранении настроек фото: {e}")
+        logger.error(f"Ошибка сохранения фото-настроек: {e}")
 
 def load_photo_settings():
     global photo_settings
@@ -107,14 +99,14 @@ def load_photo_settings():
             with open(PHOTO_SETTINGS_FILE, 'rb') as f:
                 photo_settings.update(pickle.load(f))
     except Exception as e:
-        logger.error(f"Ошибка при загрузке настроек фото: {e}")
+        logger.error(f"Ошибка загрузки фото-настроек: {e}")
 
 def save_previous_rates(rates: dict):
     try:
         with open(PREVIOUS_RATES_FILE, 'wb') as f:
             pickle.dump(rates, f)
     except Exception as e:
-        logger.error(f"Ошибка при сохранении предыдущих курсов: {e}")
+        logger.error(f"Ошибка сохранения курсов: {e}")
 
 def load_previous_rates() -> dict:
     try:
@@ -122,1310 +114,481 @@ def load_previous_rates() -> dict:
             with open(PREVIOUS_RATES_FILE, 'rb') as f:
                 return pickle.load(f)
     except Exception as e:
-        logger.error(f"Ошибка при загрузке предыдущих курсов: {e}")
+        logger.error(f"Ошибка загрузки курсов: {e}")
     return {}
 
-def get_trend_emoji(current: float, previous: float) -> str:
+
+def trend_emoji(current: float, previous: float) -> str:
     if previous == 0:
         return "🔄"
     if current > previous:
         return "📈"
     elif current < previous:
         return "📉"
-    else:
-        return "➖"
+    return "➖"
 
-def get_trend_arrow(current: float, previous: float) -> str:
+def fmt_rate(val: float) -> str:
+    return f"{val:.4f}".replace('.', ',')
+
+def fmt_change(current: float, previous: float) -> str:
     if previous == 0:
-        return "○"
-    if current > previous:
-        return "▲"
-    elif current < previous:
-        return "▼"
-    else:
-        return "■"
+        return ""
+    diff = current - previous
+    sign = "+" if diff > 0 else ""
+    return f"({sign}{diff:.4f})".replace('.', ',')
 
-def format_change(change: float) -> str:
-    if change > 0:
-        return f"+{change:.4f}"
-    elif change < 0:
-        return f"{change:.4f}"
-    else:
-        return "0.0000"
+def safe_avg(values: list) -> float:
+    return sum(values) / len(values) if values else 0.0
 
-def get_change_emoji(change: float) -> str:
-    if change > 0:
-        return "🟢"
-    elif change < 0:
-        return "🔴"
-    else:
-        return "⚪"
-
-def get_market_status(rates: dict, previous: dict) -> dict:
-    usd_change = rates.get('USD', 0) - previous.get('USD', 0)
-    eur_change = rates.get('EUR', 0) - previous.get('EUR', 0)
-    cny_change = rates.get('CNY', 0) - previous.get('CNY', 0)
-    
-    up_count = sum(1 for x in [usd_change, eur_change, cny_change] if x > 0)
-    down_count = sum(1 for x in [usd_change, eur_change, cny_change] if x < 0)
-    
-    if up_count == 3:
-        return {"status": "🚀 ВСЕ РАСТЕТ", "desc": "Все валюты дорожают"}
-    elif down_count == 3:
-        return {"status": "📉 ВСЕ ПАДАЕТ", "desc": "Все валюты дешевеют"}
-    elif up_count > down_count:
-        return {"status": "📊 БОЛЬШЕ РОСТА", "desc": "Преимущественно рост"}
-    elif down_count > up_count:
-        return {"status": "📊 БОЛЬШЕ ПАДЕНИЯ", "desc": "Преимущественно падение"}
-    else:
-        return {"status": "⚖️ СМЕШАННО", "desc": "Разнонаправленное движение"}
-
-def get_random_greeting():
-    morning_greetings = [
-        "✨ ДОБРОЕ УТРО!",
-        "🌟 ПРЕКРАСНОГО УТРА!",
-        "☀️ С ДОБРЫМ УТРОМ!",
-        "💫 НОВОГО ДНЯ!",
-        "🌅 ХОРОШЕГО НАЧАЛА!",
-        "⭐ УДАЧНОГО ДНЯ!",
-        "🎯 ПРОДУКТИВНОГО УТРА!",
-        "🚀 ВЗЛЕТАЙ!"
-    ]
-    return random.choice(morning_greetings)
-
-def get_weather_emoji():
-    weather = ["☀️", "🌤️", "⛅", "🌥️", "☁️", "🌦️", "🌧️", "⛈️", "❄️", "🌪️"]
-    return random.choice(weather)
-
-def get_motivation():
-    messages = [
-        "💎 Каждая копейка - шаг к миллиону!",
-        "📈 Инвестируй с умом!",
-        "💰 Деньги любят счет!",
-        "🎯 Будь в тренде!",
-        "⭐ Следи за курсом!",
-        "🚀 К новым высотам!",
-        "💫 Твой капитал в порядке!",
-        "🌟 Зарабатывай больше!"
-    ]
-    return random.choice(messages)
-
-def create_progress_bar(value: float, min_val: float, max_val: float, length: int = 8) -> str:
-    if max_val == min_val:
-        return "████████"
-    position = int((value - min_val) / (max_val - min_val) * length)
-    position = max(0, min(position, length))
-    bar = "█" * position + "░" * (length - position)
-    return bar
 
 async def fetch_exchange_rates() -> dict:
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(CBR_URL) as response:
-                if response.status == 200:
-                    xml_data = await response.text()
+            async with session.get(CBR_URL, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                if resp.status == 200:
+                    xml_data = await resp.text()
                     root = ElementTree.fromstring(xml_data)
                     rates = {}
                     for valute in root.findall('.//Valute'):
-                        char_code = valute.find('CharCode').text
-                        if char_code in ['USD', 'EUR', 'CNY']:
-                            value = valute.find('Value').text
-                            nominal = valute.find('Nominal').text
-                            rate = float(value.replace(',', '.')) / int(nominal)
-                            rates[char_code] = round(rate, 4)
+                        code = valute.find('CharCode').text
+                        if code in ('USD', 'EUR', 'CNY'):
+                            value   = float(valute.find('Value').text.replace(',', '.'))
+                            nominal = int(valute.find('Nominal').text)
+                            rates[code] = round(value / nominal, 4)
                     return rates
-                else:
-                    logger.error(f"Ошибка при получении данных: {response.status}")
-                    return {}
+                logger.error(f"ЦБ РФ вернул статус {resp.status}")
     except Exception as e:
-        logger.error(f"Ошибка при получении курсов: {e}")
-        return {}
+        logger.error(f"Ошибка запроса к ЦБ РФ: {e}")
+    return {}
 
-# =============================================
-# ГЛАВНАЯ ФУНКЦИЯ ФОРМАТА — стиль NT Shipping
-# =============================================
-def format_rates_message_mobile(rates: dict, previous_rates: dict, date: datetime) -> str:
+
+def msg_rates(rates: dict, prev: dict, date: datetime) -> str:
     date_str = date.strftime("%d.%m.%Y")
-
-    usd_trend = get_trend_emoji(rates.get('USD', 0), previous_rates.get('USD', 0))
-    eur_trend = get_trend_emoji(rates.get('EUR', 0), previous_rates.get('EUR', 0))
-    cny_trend = get_trend_emoji(rates.get('CNY', 0), previous_rates.get('CNY', 0))
-
+    cny = rates.get('CNY', 0)
     usd = rates.get('USD', 0)
     eur = rates.get('EUR', 0)
-    cny = rates.get('CNY', 0)
-
-    def fmt(val: float) -> str:
-        return f"{val:.4f}".replace('.', ',')
-
-    message = (
-        f"Доброе утро\n\n"
-        f"Официальный курс валют на сегодня 🤑\n\n"
-        f"<code>        {date_str}</code>\n"
-        f"🇨🇳 CNY, 1 ¥   {fmt(cny)} ₽ {cny_trend}\n"
-        f"🇺🇸 USD, 1 $   {fmt(usd)} ₽ {usd_trend}\n"
-        f"🇪🇺 EUR, 1 €   {fmt(eur)} ₽ {eur_trend}"
+    return (
+        "Доброе утро\n"
+        "\n"
+        "Официальный курс валют на сегодня 🤑\n"
+        "\n"
+        f"          <b>{date_str}</b>\n"
+        "\n"
+        f"🇨🇳 CNY, 1 \u00a5   {fmt_rate(cny)} \u20bd {trend_emoji(cny, prev.get('CNY', 0))} {fmt_change(cny, prev.get('CNY', 0))}\n"
+        f"🇺🇸 USD, 1 $   {fmt_rate(usd)} \u20bd {trend_emoji(usd, prev.get('USD', 0))} {fmt_change(usd, prev.get('USD', 0))}\n"
+        f"🇪🇺 EUR, 1 \u20ac   {fmt_rate(eur)} \u20bd {trend_emoji(eur, prev.get('EUR', 0))} {fmt_change(eur, prev.get('EUR', 0))}"
     )
-    return message
 
-def format_trends_message_mobile(history: deque) -> str:
+
+def msg_trends(history: deque) -> str:
     if not history:
-        return "❌ Нет данных"
-    
-    recent = list(history)[-5:]
-    
-    message = """
-╔════════════════════╗
-║   📊 ИСТОРИЯ      ║
-╠════════════════════╣
-"""
+        return "❌ Нет данных для отображения"
+    recent = list(history)[-7:]
+    lines = [
+        "📊 <b>История курсов</b>",
+        "",
+        "<b>Дата       CNY      USD      EUR</b>",
+        "─────────────────────────────",
+    ]
     for item in recent:
-        date = item['date'].strftime("%d.%m")
+        d   = item['date'].strftime("%d.%m")
+        cny = item['rates'].get('CNY', 0)
         usd = item['rates'].get('USD', 0)
         eur = item['rates'].get('EUR', 0)
-        cny = item['rates'].get('CNY', 0)
-        message += f"║{date} {usd:.2f}/{eur:.2f}/{cny:.2f}║\n"
-    
+        lines.append(f"{d}     {cny:.2f}   {usd:.2f}   {eur:.2f}")
     if len(recent) >= 2:
-        first_usd = recent[0]['rates'].get('USD', 0)
-        last_usd = recent[-1]['rates'].get('USD', 0)
-        usd_trend = "📈" if last_usd > first_usd else "📉"
-        message += f"""
-╠════════════════════╣
-║Тренд: USD {usd_trend} {last_usd-first_usd:+.2f}₽║
-╚════════════════════╝
-"""
-    return message
+        lines.append("")
+        for code in ('CNY', 'USD', 'EUR'):
+            first = recent[0]['rates'].get(code, 0)
+            last  = recent[-1]['rates'].get(code, 0)
+            diff  = last - first
+            sign  = "+" if diff >= 0 else ""
+            lines.append(f"{trend_emoji(last, first)} {code}: {sign}{diff:.4f} \u20bd за период")
+    return "\n".join(lines)
 
-def create_admin_keyboard() -> InlineKeyboardMarkup:
-    keyboard = InlineKeyboardMarkup(row_width=1)
-    keyboard.add(InlineKeyboardButton(text="📸 НАСТРОИТЬ ФОТО", callback_data="setup_photo"))
-    keyboard.add(InlineKeyboardButton(text="📊 СТАТИСТИКА", callback_data="show_stats"))
-    keyboard.add(InlineKeyboardButton(text="📈 ТЕСТ С ФОТО", callback_data="test_photo"))
-    keyboard.add(InlineKeyboardButton(text="❌ ОТКЛЮЧИТЬ ФОТО", callback_data="disable_photo"))
-    keyboard.add(InlineKeyboardButton(text="📋 ПРОВЕРИТЬ ФОТО", callback_data="check_photo"))
-    return keyboard
 
-async def send_rates_with_photo(chat_id: str, message_text: str):
-    try:
-        if photo_settings['use_photo']:
-            if photo_settings.get('photo_file_id'):
-                await bot.send_photo(chat_id=chat_id, photo=photo_settings['photo_file_id'],
-                                     caption=message_text, parse_mode=types.ParseMode.HTML)
-            elif photo_settings.get('photo_path') and os.path.exists(photo_settings['photo_path']):
-                with open(photo_settings['photo_path'], 'rb') as photo:
-                    sent_message = await bot.send_photo(chat_id=chat_id, photo=photo,
-                                                        caption=message_text, parse_mode=types.ParseMode.HTML)
-                    photo_settings['photo_file_id'] = sent_message.photo[-1].file_id
-                    save_photo_settings()
-            elif photo_settings.get('photo_url'):
-                await bot.send_photo(chat_id=chat_id, photo=photo_settings['photo_url'],
-                                     caption=message_text, parse_mode=types.ParseMode.HTML)
-            else:
-                await bot.send_message(chat_id=chat_id, text=message_text, parse_mode=types.ParseMode.HTML)
-        else:
-            await bot.send_message(chat_id=chat_id, text=message_text, parse_mode=types.ParseMode.HTML)
-    except Exception as e:
-        logger.error(f"Ошибка при отправке с фото: {e}")
-        await bot.send_message(chat_id=chat_id, text=message_text + "\n\n⚠️ Ошибка фото",
-                               parse_mode=types.ParseMode.HTML)
-
-async def send_daily_rates():
-    logger.info("📨 Отправка ежедневных курсов...")
-    previous_rates = load_previous_rates()
-    rates = await fetch_exchange_rates()
-    if rates:
-        current_date = datetime.now()
-        message_text = format_rates_message_mobile(rates, previous_rates, current_date)
-        try:
-            save_previous_rates(rates)
-            save_rates_history(rates)
-            stats['total_sent'] += 1
-            stats['last_update'] = current_date
-            save_stats()
-            await send_rates_with_photo(CHAT_ID, message_text)
-            logger.info("✅ Курсы успешно отправлены")
-        except Exception as e:
-            logger.error(f"❌ Ошибка при отправке: {e}")
-    else:
-        logger.error("❌ Не удалось получить курсы")
-        try:
-            await bot.send_message(chat_id=CHAT_ID,
-                                   text="❌ <b>НЕ УДАЛОСЬ ПОЛУЧИТЬ КУРСЫ</b>\nПроверьте соединение",
-                                   parse_mode=types.ParseMode.HTML)
-        except:
-            pass
-
-@dp.callback_query_handler(lambda c: c.data == 'setup_photo')
-async def process_setup_photo(callback_query: types.CallbackQuery):
-    await bot.answer_callback_query(callback_query.id)
-    await bot.send_message(callback_query.from_user.id,
-        "📸 НАСТРОЙКА ФОТО\n\n"
-        "1️⃣ Отправьте фото боту\n"
-        "2️⃣ /set_photo_path /путь/к/фото.jpg\n"
-        "3️⃣ /set_photo_url https://example.com/photo.jpg",
-        parse_mode=types.ParseMode.HTML)
-
-@dp.callback_query_handler(lambda c: c.data == 'show_stats')
-async def process_stats_callback(callback_query: types.CallbackQuery):
-    await bot.answer_callback_query(callback_query.id, text="📊 Статистика")
-    stats_text = (
-        f"╔════════════════════╗\n"
-        f"║   📊 СТАТИСТИКА   ║\n"
-        f"╠════════════════════╣\n"
-        f"║👥 {len(stats['users_count'])} польз.\n"
-        f"║📨 {stats['total_sent']} отправок\n"
-        f"║🔄 {stats['total_requests']} запросов\n"
-        f"║📸 {'ВКЛ' if photo_settings['use_photo'] else 'ВЫКЛ'}\n"
-        f"╚════════════════════╝"
-    )
-    await bot.send_message(callback_query.from_user.id, stats_text, parse_mode=types.ParseMode.HTML)
-
-@dp.callback_query_handler(lambda c: c.data == 'test_photo')
-async def process_test_photo(callback_query: types.CallbackQuery):
-    await bot.answer_callback_query(callback_query.id, text="📸 Тест...")
-    previous_rates = load_previous_rates()
-    rates = await fetch_exchange_rates()
-    if rates:
-        current_date = datetime.now()
-        message_text = format_rates_message_mobile(rates, previous_rates, current_date)
-        await send_rates_with_photo(callback_query.from_user.id, message_text)
-        await bot.send_message(callback_query.from_user.id, "✅ Тест отправлен!", parse_mode=types.ParseMode.HTML)
-    else:
-        await bot.send_message(callback_query.from_user.id, "❌ Ошибка получения курсов", parse_mode=types.ParseMode.HTML)
-
-@dp.callback_query_handler(lambda c: c.data == 'disable_photo')
-async def process_disable_photo(callback_query: types.CallbackQuery):
-    photo_settings['use_photo'] = False
-    save_photo_settings()
-    await bot.answer_callback_query(callback_query.id, text="✅ Фото отключено")
-    await bot.send_message(callback_query.from_user.id, "✅ Фото отключено", parse_mode=types.ParseMode.HTML)
-
-@dp.callback_query_handler(lambda c: c.data == 'check_photo')
-async def process_check_photo(callback_query: types.CallbackQuery):
-    status = "🟢 ВКЛ" if photo_settings['use_photo'] else "🔴 ВЫКЛ"
-    await bot.answer_callback_query(callback_query.id)
-    await bot.send_message(callback_query.from_user.id,
-        f"📸 СТАТУС ФОТО\n\nСтатус: {status}\n/admin для настройки",
-        parse_mode=types.ParseMode.HTML)
-
-@dp.message_handler(commands=['start'])
-async def cmd_start(message: types.Message):
-    if str(message.chat.id).startswith('-100'):
-        return
-    stats['users_count'].add(message.from_user.id)
-    stats['total_requests'] += 1
-    save_stats()
-    welcome_text = (
-        "╔════════════════════╗\n"
-        "║  💎NT SHIPPING💎   ║\n"
-        "╠════════════════════╣\n"
-        "║   👋 ДОБРО ПОЖАЛОВАТЬ!\n"
-        "╠════════════════════╣\n"
-        "║📊 Курсы ЦБ РФ\n"
-        "║💵 USD/EUR/CNY\n"
-        "╠════════════════════╣\n"
-        "║⚡ ВОЗМОЖНОСТИ:\n"
-        "║✅ Рассылка 8:00\n"
-        "║✅ Тренды\n"
-        "║✅ История\n"
-        "║✅ Аналитика\n"
-        "╠════════════════════╣\n"
-        "║📋 КОМАНДЫ:\n"
-        "║💰 /rates - курсы\n"
-        "║📈 /trends - история\n"
-        "║📊 /analytics - аналитика\n"
-        "║ℹ️ /help - помощь\n"
-        "║👤 /about - о боте\n"
-        "╚════════════════════╝"
-    )
-    await message.reply(welcome_text, parse_mode=types.ParseMode.HTML)
-
-@dp.message_handler(commands=['admin'])
-async def cmd_admin(message: types.Message):
-    if message.from_user.id not in ADMIN_IDS:
-        await message.reply("⛔ Нет доступа")
-        return
-    admin_text = (
-        f"╔════════════════════╗\n"
-        f"║    ⚙️ АДМИН       ║\n"
-        f"╠════════════════════╣\n"
-        f"║📸 Фото: {'ВКЛ' if photo_settings['use_photo'] else 'ВЫКЛ'}\n"
-        f"║👥 {len(stats['users_count'])} польз.\n"
-        f"║📨 {stats['total_sent']} отправок\n"
-        f"╚════════════════════╝"
-    )
-    await message.reply(admin_text, parse_mode=types.ParseMode.HTML, reply_markup=create_admin_keyboard())
-
-@dp.message_handler(commands=['help'])
-async def cmd_help(message: types.Message):
-    help_text = (
-        "╔════════════════════╗\n"
-        "║    📚 ПОМОЩЬ      ║\n"
-        "╠════════════════════╣\n"
-        "║📌 ДОБАВЛЕНИЕ:\n"
-        "║1. Настройки канала\n"
-        "║2. Администраторы\n"
-        "║3. Добавить бота\n"
-        "║4. Разрешить отправку\n"
-        "╠════════════════════╣\n"
-        "║📋 КОМАНДЫ:\n"
-        "║💰 /rates - курсы\n"
-        "║📈 /trends - история\n"
-        "║📊 /analytics - аналитика\n"
-        "║ℹ️ /help - помощь\n"
-        "╠════════════════════╣\n"
-        "║😊 СМАЙЛИКИ:\n"
-        "║📈 - рост\n"
-        "║📉 - падение\n"
-        "║🟢 - позитив\n"
-        "║🔴 - негатив\n"
-        "╚════════════════════╝"
-    )
-    await message.reply(help_text, parse_mode=types.ParseMode.HTML)
-
-@dp.message_handler(commands=['about'])
-async def cmd_about(message: types.Message):
-    about_text = (
-        "╔════════════════════╗\n"
-        "║  💎NT SHIPPING💎   ║\n"
-        "╠════════════════════╣\n"
-        "║🤖 О БОТЕ\n"
-        "║📌 v4.0\n"
-        "║📌 ЦБ РФ\n"
-        "║📌 8:00 МСК\n"
-        "╠════════════════════╣\n"
-        "║📊 ФУНКЦИИ:\n"
-        "║✅ Авторассылка\n"
-        "║✅ Тренды\n"
-        "║✅ История\n"
-        "║✅ Аналитика\n"
-        "╠════════════════════╣\n"
-        "║👨‍💻 @fuckForensics\n"
-        "║🌐 nt-shipping.ru\n"
-        "╚════════════════════╝"
-    )
-    await message.reply(about_text, parse_mode=types.ParseMode.HTML)
-
-@dp.message_handler(commands=['rates'])
-async def cmd_rates(message: types.Message):
-    if str(message.chat.id).startswith('-100'):
-        return
-    stats['users_count'].add(message.from_user.id)
-    stats['total_requests'] += 1
-    save_stats()
-    await message.reply("🔄 Получаю...", parse_mode=types.ParseMode.HTML)
-    previous_rates = load_previous_rates()
-    rates = await fetch_exchange_rates()
-    if rates:
-        save_previous_rates(rates)
-        save_rates_history(rates)
-        current_date = datetime.now()
-        message_text = format_rates_message_mobile(rates, previous_rates, current_date)
-        await send_rates_with_photo(message.chat.id, message_text)
-    else:
-        await message.reply("❌ Ошибка получения", parse_mode=types.ParseMode.HTML)
-
-@dp.message_handler(commands=['trends'])
-async def cmd_trends(message: types.Message):
-    if str(message.chat.id).startswith('-100'):
-        return
-    if rates_history:
-        message_text = format_trends_message_mobile(rates_history)
-        await message.reply(message_text, parse_mode=types.ParseMode.HTML)
-    else:
-        await message.reply("❌ Нет данных")
-
-@dp.message_handler(commands=['analytics'])
-async def cmd_analytics(message: types.Message):
-    if str(message.chat.id).startswith('-100'):
-        return
-    if not rates_history or len(rates_history) < 2:
-        await message.reply("❌ Мало данных")
-        return
-    recent = list(rates_history)[-5:]
-    usd_values = [item['rates'].get('USD', 0) for item in recent]
-    eur_values = [item['rates'].get('EUR', 0) for item in recent]
-    cny_values = [item['rates'].get('CNY', 0) for item in recent]
-    analytics_text = (
-        f"╔════════════════════╗\n"
-        f"║   📊 АНАЛИТИКА    ║\n"
-        f"╠════════════════════╣\n"
-        f"║🇺🇸 USD\n"
-        f"║📊 {usd_values[-1]:.2f} ₽\n"
-        f"║📈 ср: {sum(usd_values)/len(usd_values):.2f} ₽\n\n"
-        f"║🇪🇺 EUR\n"
-        f"║📊 {eur_values[-1]:.2f} ₽\n"
-        f"║📈 ср: {sum(eur_values)/len(eur_values):.2f} ₽\n\n"
-        f"║🇨🇳 CNY\n"
-        f"║📊 {cny_values[-1]:.2f} ₽\n"
-        f"║📈 ср: {sum(cny_values)/len(cny_values):.2f} ₽\n"
-        f"╚════════════════════╝"
-    )
-    await message.reply(analytics_text, parse_mode=types.ParseMode.HTML)
-
-@dp.message_handler(commands=['set_photo_path'])
-async def cmd_set_photo_path(message: types.Message):
-    if message.from_user.id not in ADMIN_IDS:
-        return
-    path = message.get_args().strip()
-    if not path:
-        await message.reply("❌ Укажите путь")
-        return
-    if os.path.exists(path):
-        photo_settings['use_photo'] = True
-        photo_settings['photo_path'] = path
-        photo_settings['photo_url'] = ''
-        photo_settings['photo_file_id'] = ''
-        save_photo_settings()
-        await message.reply("✅ Путь сохранен")
-    else:
-        await message.reply("❌ Файл не найден")
-
-@dp.message_handler(commands=['set_photo_url'])
-async def cmd_set_photo_url(message: types.Message):
-    if message.from_user.id not in ADMIN_IDS:
-        return
-    url = message.get_args().strip()
-    if not url:
-        await message.reply("❌ Укажите URL")
-        return
-    photo_settings['use_photo'] = True
-    photo_settings['photo_url'] = url
-    photo_settings['photo_path'] = ''
-    photo_settings['photo_file_id'] = ''
-    save_photo_settings()
-    await message.reply("✅ URL сохранен")
-
-@dp.message_handler(content_types=['photo'])
-async def handle_photo(message: types.Message):
-    if message.from_user.id in ADMIN_IDS:
-        photo_settings['use_photo'] = True
-        photo_settings['photo_file_id'] = message.photo[-1].file_id
-        photo_settings['photo_path'] = ''
-        photo_settings['photo_url'] = ''
-        save_photo_settings()
-        await message.reply("✅ Фото сохранено!")
-    if message.caption and '/rates' in message.caption:
-        if str(message.chat.id).startswith('-100'):
-            return
-        await message.reply("🔄 Получаю...", parse_mode=types.ParseMode.HTML)
-        previous_rates = load_previous_rates()
-        rates = await fetch_exchange_rates()
-        if rates:
-            save_previous_rates(rates)
-            current_date = datetime.now()
-            message_text = format_rates_message_mobile(rates, previous_rates, current_date)
-            await message.reply_photo(photo=message.photo[-1].file_id,
-                                      caption=message_text, parse_mode=types.ParseMode.HTML)
-
-async def on_startup(dp):
-    logger.info("🚀 ЗАПУСК...")
-    load_photo_settings()
-    load_rates_history()
-    load_stats()
-    logger.info(f"📊 История: {len(rates_history)}")
-    logger.info(f"👥 Пользователей: {len(stats['users_count'])}")
-    scheduler.add_job(send_daily_rates, trigger="cron", hour=8, minute=0,
-                      id="daily_rates", replace_existing=True)
-    scheduler.start()
-    logger.info("⏰ Планировщик: 8:00 МСК")
-    for admin_id in ADMIN_IDS:
-        try:
-            await bot.send_message(admin_id,
-                f"╔════════════════════╗\n"
-                f"║   ✅ ЗАПУЩЕН      ║\n"
-                f"╠════════════════════╣\n"
-                f"║⏰ 8:00 МСК\n"
-                f"║📊 {CHAT_ID}\n"
-                f"║📸 {'ВКЛ' if photo_settings['use_photo'] else 'ВЫКЛ'}\n"
-                f"║👥 {len(stats['users_count'])} польз.\n"
-                f"╚════════════════════╝",
-                parse_mode=types.ParseMode.HTML)
-        except Exception as e:
-            logger.error(f"Ошибка уведомления: {e}")
-
-async def on_shutdown(dp):
-    logger.info("🛑 ОСТАНОВКА...")
-    save_stats()
-    scheduler.shutdown()
-    await bot.close()
-
-if __name__ == "__main__":
-    executor.start_polling(dp, skip_updates=True, on_startup=on_startup, on_shutdown=on_shutdown)
-photo_settings = {
-    'use_photo': False,
-    'photo_path': '',
-    'photo_url': '',
-    'photo_file_id': ''
-}
-
-stats = {
-    'total_requests': 0,
-    'total_sent': 0,
-    'last_update': None,
-    'users_count': set(),
-    'daily_stats': {},
-    'weekly_avg': {}
-}
-
-rates_history = deque(maxlen=30)
-
-def save_stats():
-    try:
-        stats['users_count'] = list(stats['users_count'])
-        with open(STATS_FILE, 'wb') as f:
-            pickle.dump(stats, f)
-    except Exception as e:
-        logger.error(f"Ошибка при сохранении статистики: {e}")
-
-def load_stats():
-    global stats
-    try:
-        if os.path.exists(STATS_FILE):
-            with open(STATS_FILE, 'rb') as f:
-                loaded = pickle.load(f)
-                loaded['users_count'] = set(loaded['users_count'])
-                stats.update(loaded)
-    except Exception as e:
-        logger.error(f"Ошибка при загрузке статистики: {e}")
-
-def save_rates_history(rates: dict):
-    try:
-        rates_history.append({
-            'date': datetime.now(),
-            'rates': rates.copy()
-        })
-        with open(HISTORY_FILE, 'wb') as f:
-            pickle.dump(list(rates_history), f)
-    except Exception as e:
-        logger.error(f"Ошибка при сохранении истории: {e}")
-
-def load_rates_history():
-    global rates_history
-    try:
-        if os.path.exists(HISTORY_FILE):
-            with open(HISTORY_FILE, 'rb') as f:
-                data = pickle.load(f)
-                rates_history = deque(data, maxlen=30)
-    except Exception as e:
-        logger.error(f"Ошибка при загрузке истории: {e}")
-
-def save_photo_settings():
-    try:
-        with open(PHOTO_SETTINGS_FILE, 'wb') as f:
-            pickle.dump(photo_settings, f)
-    except Exception as e:
-        logger.error(f"Ошибка при сохранении настроек фото: {e}")
-
-def load_photo_settings():
-    global photo_settings
-    try:
-        if os.path.exists(PHOTO_SETTINGS_FILE):
-            with open(PHOTO_SETTINGS_FILE, 'rb') as f:
-                photo_settings.update(pickle.load(f))
-    except Exception as e:
-        logger.error(f"Ошибка при загрузке настроек фото: {e}")
-
-def save_previous_rates(rates: dict):
-    try:
-        with open(PREVIOUS_RATES_FILE, 'wb') as f:
-            pickle.dump(rates, f)
-    except Exception as e:
-        logger.error(f"Ошибка при сохранении предыдущих курсов: {e}")
-
-def load_previous_rates() -> dict:
-    try:
-        if os.path.exists(PREVIOUS_RATES_FILE):
-            with open(PREVIOUS_RATES_FILE, 'rb') as f:
-                return pickle.load(f)
-    except Exception as e:
-        logger.error(f"Ошибка при загрузке предыдущих курсов: {e}")
-    return {}
-
-def get_trend_emoji(current: float, previous: float) -> str:
-    if previous == 0:
-        return "🔄"
-    if current > previous:
-        return "📈"
-    elif current < previous:
-        return "📉"
-    else:
-        return "➖"
-
-def get_trend_arrow(current: float, previous: float) -> str:
-    if previous == 0:
-        return "○"
-    if current > previous:
-        return "▲"
-    elif current < previous:
-        return "▼"
-    else:
-        return "■"
-
-def format_change(change: float) -> str:
-    if change > 0:
-        return f"+{change:.4f}"
-    elif change < 0:
-        return f"{change:.4f}"
-    else:
-        return "0.0000"
-
-def get_change_emoji(change: float) -> str:
-    if change > 0:
-        return "🟢"
-    elif change < 0:
-        return "🔴"
-    else:
-        return "⚪"
-
-def get_market_status(rates: dict, previous: dict) -> dict:
-    usd_change = rates.get('USD', 0) - previous.get('USD', 0)
-    eur_change = rates.get('EUR', 0) - previous.get('EUR', 0)
-    cny_change = rates.get('CNY', 0) - previous.get('CNY', 0)
-    
-    up_count = sum(1 for x in [usd_change, eur_change, cny_change] if x > 0)
-    down_count = sum(1 for x in [usd_change, eur_change, cny_change] if x < 0)
-    
-    if up_count == 3:
-        return {"status": "🚀 ВСЕ РАСТЕТ", "desc": "Все валюты дорожают"}
-    elif down_count == 3:
-        return {"status": "📉 ВСЕ ПАДАЕТ", "desc": "Все валюты дешевеют"}
-    elif up_count > down_count:
-        return {"status": "📊 БОЛЬШЕ РОСТА", "desc": "Преимущественно рост"}
-    elif down_count > up_count:
-        return {"status": "📊 БОЛЬШЕ ПАДЕНИЯ", "desc": "Преимущественно падение"}
-    else:
-        return {"status": "⚖️ СМЕШАННО", "desc": "Разнонаправленное движение"}
-
-def get_random_greeting():
-    morning_greetings = [
-        "✨ ДОБРОЕ УТРО!",
-        "🌟 ПРЕКРАСНОГО УТРА!",
-        "☀️ С ДОБРЫМ УТРОМ!",
-        "💫 НОВОГО ДНЯ!",
-        "🌅 ХОРОШЕГО НАЧАЛА!",
-        "⭐ УДАЧНОГО ДНЯ!",
-        "🎯 ПРОДУКТИВНОГО УТРА!",
-        "🚀 ВЗЛЕТАЙ!"
-    ]
-    return random.choice(morning_greetings)
-
-def get_weather_emoji():
-    weather = ["☀️", "🌤️", "⛅", "🌥️", "☁️", "🌦️", "🌧️", "⛈️", "❄️", "🌪️"]
-    return random.choice(weather)
-
-def get_motivation():
-    messages = [
-        "💎 Каждая копейка - шаг к миллиону!",
-        "📈 Инвестируй с умом!",
-        "💰 Деньги любят счет!",
-        "🎯 Будь в тренде!",
-        "⭐ Следи за курсом!",
-        "🚀 К новым высотам!",
-        "💫 Твой капитал в порядке!",
-        "🌟 Зарабатывай больше!"
-    ]
-    return random.choice(messages)
-
-def create_progress_bar(value: float, min_val: float, max_val: float, length: int = 8) -> str:
-    if max_val == min_val:
-        return "████████"
-    
-    position = int((value - min_val) / (max_val - min_val) * length)
-    position = max(0, min(position, length))
-    
-    bar = "█" * position + "░" * (length - position)
-    return bar
-
-async def fetch_exchange_rates() -> dict:
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(CBR_URL) as response:
-                if response.status == 200:
-                    xml_data = await response.text()
-                    root = ElementTree.fromstring(xml_data)
-                    
-                    rates = {}
-                    
-                    for valute in root.findall('.//Valute'):
-                        char_code = valute.find('CharCode').text
-                        if char_code in ['USD', 'EUR', 'CNY']:
-                            value = valute.find('Value').text
-                            nominal = valute.find('Nominal').text
-                            
-                            rate = float(value.replace(',', '.')) / int(nominal)
-                            rates[char_code] = round(rate, 4)
-                    
-                    return rates
-                else:
-                    logger.error(f"Ошибка при получении данных: {response.status}")
-                    return {}
-    except Exception as e:
-        logger.error(f"Ошибка при получении курсов: {e}")
-        return {}
-
-def format_rates_message_mobile(rates: dict, previous_rates: dict, date: datetime) -> str:
-    date_str = date.strftime("%d.%m.%Y")
-    time_str = date.strftime("%H:%M")
-    
-    usd_change = rates.get('USD', 0) - previous_rates.get('USD', 0)
-    eur_change = rates.get('EUR', 0) - previous_rates.get('EUR', 0)
-    cny_change = rates.get('CNY', 0) - previous_rates.get('CNY', 0)
-    
-    usd_trend = get_trend_emoji(rates.get('USD', 0), previous_rates.get('USD', 0))
-    eur_trend = get_trend_emoji(rates.get('EUR', 0), previous_rates.get('EUR', 0))
-    cny_trend = get_trend_emoji(rates.get('CNY', 0), previous_rates.get('CNY', 0))
-    
-    usd_arrow = get_trend_arrow(rates.get('USD', 0), previous_rates.get('USD', 0))
-    eur_arrow = get_trend_arrow(rates.get('EUR', 0), previous_rates.get('EUR', 0))
-    cny_arrow = get_trend_arrow(rates.get('CNY', 0), previous_rates.get('CNY', 0))
-    
-    market = get_market_status(rates, previous_rates)
-    motivation = get_motivation()
-    
-    message = f"""
-╔════════════════════╗
-║  💎NT SHIPPING CO💎 ║
-╠════════════════════╣
-║ {get_weather_emoji()} {date_str} {time_str} ║
-╠════════════════════╣
-║ {get_random_greeting()} ║
-╠════════════════════╣
-║  📊 КУРСЫ ЦБ РФ   ║
-╠════════════════════╣
-║🇺🇸 <b>USD</b> {usd_trend}{usd_arrow}    ║
-║<code>{rates.get('USD', 0):.4f}</code> ₽       ║
-║{get_change_emoji(usd_change)} {format_change(usd_change)}║
-║{create_progress_bar(rates.get('USD', 0), 70, 100)}║
-║                    ║
-║🇪🇺 <b>EUR</b> {eur_trend}{eur_arrow}    ║
-║<code>{rates.get('EUR', 0):.4f}</code> ₽       ║
-║{get_change_emoji(eur_change)} {format_change(eur_change)}║
-║{create_progress_bar(rates.get('EUR', 0), 80, 110)}║
-║                    ║
-║🇨🇳 <b>CNY</b> {cny_trend}{cny_arrow}    ║
-║<code>{rates.get('CNY', 0):.4f}</code> ₽       ║
-║{get_change_emoji(cny_change)} {format_change(cny_change)}║
-║{create_progress_bar(rates.get('CNY', 0), 10, 15)}║
-╠════════════════════╣
-║{market['status']}   ║
-║{market['desc']}     ║
-╠════════════════════╣
-║💬 {motivation}      ║
-╠════════════════════╣
-║    💎NT SHIPPING💎  ║
-╚════════════════════╝
-"""
-    return message
-
-def format_trends_message_mobile(history: deque) -> str:
-    if not history:
-        return "❌ Нет данных"
-    
+def msg_analytics(history: deque) -> str:
+    if len(history) < 2:
+        return "❌ Недостаточно данных — нужно минимум 2 записи"
     recent = list(history)[-5:]
-    
-    message = """
-╔════════════════════╗
-║   📊 ИСТОРИЯ      ║
-╠════════════════════╣
-"""
-    
-    for item in recent:
-        date = item['date'].strftime("%d.%m")
-        usd = item['rates'].get('USD', 0)
-        eur = item['rates'].get('EUR', 0)
-        cny = item['rates'].get('CNY', 0)
-        
-        message += f"║{date} {usd:.2f}/{eur:.2f}/{cny:.2f}║\n"
-    
-    if len(recent) >= 2:
-        first_usd = recent[0]['rates'].get('USD', 0)
-        last_usd = recent[-1]['rates'].get('USD', 0)
-        usd_trend = "📈" if last_usd > first_usd else "📉"
-        
-        message += f"""
-╠════════════════════╣
-║Тренд: USD {usd_trend} {last_usd-first_usd:+.2f}₽║
-╚════════════════════╝
-"""
-    return message
 
-def create_admin_keyboard() -> InlineKeyboardMarkup:
-    keyboard = InlineKeyboardMarkup(row_width=1)
-    keyboard.add(
-        InlineKeyboardButton(text="📸 НАСТРОИТЬ ФОТО", callback_data="setup_photo")
-    )
-    keyboard.add(
-        InlineKeyboardButton(text="📊 СТАТИСТИКА", callback_data="show_stats")
-    )
-    keyboard.add(
-        InlineKeyboardButton(text="📈 ТЕСТ С ФОТО", callback_data="test_photo")
-    )
-    keyboard.add(
-        InlineKeyboardButton(text="❌ ОТКЛЮЧИТЬ ФОТО", callback_data="disable_photo")
-    )
-    keyboard.add(
-        InlineKeyboardButton(text="📋 ПРОВЕРИТЬ ФОТО", callback_data="check_photo")
-    )
-    return keyboard
+    def block(code: str, flag: str) -> list:
+        values = [item['rates'].get(code, 0) for item in recent]
+        return [
+            f"{flag} <b>{code}</b>  {trend_emoji(values[-1], values[0])}",
+            f"  Сейчас:   {fmt_rate(values[-1])} \u20bd",
+            f"  Среднее:  {fmt_rate(safe_avg(values))} \u20bd",
+            f"  Мин/Макс: {fmt_rate(min(values))} / {fmt_rate(max(values))} \u20bd",
+        ]
 
-async def send_rates_with_photo(chat_id: str, message_text: str):
+    lines = ["📈 <b>Аналитика курсов</b> (последние 5 дней)", ""]
+    lines += block('CNY', '🇨🇳')
+    lines.append("")
+    lines += block('USD', '🇺🇸')
+    lines.append("")
+    lines += block('EUR', '🇪🇺')
+    return "\n".join(lines)
+
+
+def msg_start() -> str:
+    return (
+        "👋 Добро пожаловать!\n"
+        "\n"
+        "💎 <b>NT Shipping Co</b> — курсы валют ЦБ РФ\n"
+        "\n"
+        "🇨🇳 CNY  🇺🇸 USD  🇪🇺 EUR\n"
+        "\n"
+        "📋 <b>Команды:</b>\n"
+        "💰 /rates — текущий курс\n"
+        "📊 /trends — история за 7 дней\n"
+        "📈 /analytics — аналитика\n"
+        "ℹ️ /about — о боте\n"
+        "📚 /help — помощь\n"
+        "\n"
+        "⏰ Автоматическая рассылка в 08:00 МСК"
+    )
+
+
+def msg_help() -> str:
+    return (
+        "📚 <b>Помощь</b>\n"
+        "\n"
+        "📌 <b>Как добавить бота в канал:</b>\n"
+        "1. Настройки канала\n"
+        "2. Администраторы\n"
+        "3. Добавить бота\n"
+        "4. Разрешить отправку сообщений\n"
+        "\n"
+        "📋 <b>Команды:</b>\n"
+        "💰 /rates — текущий курс\n"
+        "📊 /trends — история за 7 дней\n"
+        "📈 /analytics — аналитика\n"
+        "👤 /about — о боте\n"
+        "\n"
+        "📸 <b>Иконки тренда:</b>\n"
+        "📈 — курс вырос\n"
+        "📉 — курс упал\n"
+        "➖ — без изменений"
+    )
+
+
+def msg_about() -> str:
+    return (
+        "💎 <b>NT Shipping Co</b>\n"
+        "\n"
+        "🤖 Бот курсов валют v5.0\n"
+        "📡 Источник: ЦБ РФ\n"
+        "⏰ Рассылка: 08:00 МСК\n"
+        "\n"
+        "✅ Авторассылка в канал\n"
+        "✅ История курсов\n"
+        "✅ Аналитика трендов\n"
+        "✅ Фото к сообщениям\n"
+        "\n"
+        "👨\u200d💻 @fuckForensics\n"
+        "🌐 nt-shipping.ru"
+    )
+
+
+def msg_admin() -> str:
+    photo_status = "✅ включено" if photo_settings['use_photo'] else "❌ выключено"
+    return (
+        "⚙️ <b>Админ-панель</b>\n"
+        "\n"
+        f"👥 Пользователей: {len(stats['users_count'])}\n"
+        f"📨 Отправок: {stats['total_sent']}\n"
+        f"🔄 Запросов: {stats['total_requests']}\n"
+        f"📸 Фото: {photo_status}"
+    )
+
+
+def msg_stats() -> str:
+    last = stats.get('last_update')
+    last_str = last.strftime("%d.%m.%Y %H:%M") if last else "—"
+    return (
+        "📊 <b>Статистика</b>\n"
+        "\n"
+        f"👥 Пользователей: {len(stats['users_count'])}\n"
+        f"📨 Отправок: {stats['total_sent']}\n"
+        f"🔄 Запросов: {stats['total_requests']}\n"
+        f"🕐 Последняя рассылка: {last_str}"
+    )
+
+
+def admin_keyboard() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardMarkup(row_width=2)
+    kb.add(
+        InlineKeyboardButton("📊 Статистика",     callback_data="show_stats"),
+        InlineKeyboardButton("📸 Настроить фото", callback_data="setup_photo"),
+    )
+    kb.add(
+        InlineKeyboardButton("🧪 Тест рассылки",  callback_data="test_photo"),
+        InlineKeyboardButton("❌ Выкл. фото",      callback_data="disable_photo"),
+    )
+    kb.add(
+        InlineKeyboardButton("📋 Статус фото",    callback_data="check_photo"),
+    )
+    return kb
+
+
+async def send_message_smart(chat_id, text: str):
+    HTML = types.ParseMode.HTML
     try:
         if photo_settings['use_photo']:
-            if photo_settings.get('photo_file_id'):
-                await bot.send_photo(
-                    chat_id=chat_id,
-                    photo=photo_settings['photo_file_id'],
-                    caption=message_text,
-                    parse_mode=types.ParseMode.HTML
-                )
-            elif photo_settings.get('photo_path') and os.path.exists(photo_settings['photo_path']):
-                with open(photo_settings['photo_path'], 'rb') as photo:
-                    sent_message = await bot.send_photo(
-                        chat_id=chat_id,
-                        photo=photo,
-                        caption=message_text,
-                        parse_mode=types.ParseMode.HTML
-                    )
-                    photo_settings['photo_file_id'] = sent_message.photo[-1].file_id
-                    save_photo_settings()
-            elif photo_settings.get('photo_url'):
-                await bot.send_photo(
-                    chat_id=chat_id,
-                    photo=photo_settings['photo_url'],
-                    caption=message_text,
-                    parse_mode=types.ParseMode.HTML
-                )
-            else:
-                await bot.send_message(
-                    chat_id=chat_id,
-                    text=message_text,
-                    parse_mode=types.ParseMode.HTML
-                )
-        else:
-            await bot.send_message(
-                chat_id=chat_id,
-                text=message_text,
-                parse_mode=types.ParseMode.HTML
-            )
+            fid  = photo_settings.get('photo_file_id')
+            path = photo_settings.get('photo_path')
+            url  = photo_settings.get('photo_url')
+            if fid:
+                await bot.send_photo(chat_id=chat_id, photo=fid, caption=text, parse_mode=HTML)
+                return
+            if path and os.path.exists(path):
+                with open(path, 'rb') as ph:
+                    sent = await bot.send_photo(chat_id=chat_id, photo=ph, caption=text, parse_mode=HTML)
+                photo_settings['photo_file_id'] = sent.photo[-1].file_id
+                save_photo_settings()
+                return
+            if url:
+                await bot.send_photo(chat_id=chat_id, photo=url, caption=text, parse_mode=HTML)
+                return
+        await bot.send_message(chat_id=chat_id, text=text, parse_mode=HTML)
     except Exception as e:
-        logger.error(f"Ошибка при отправке с фото: {e}")
-        await bot.send_message(
-            chat_id=chat_id,
-            text=message_text + "\n\n⚠️ Ошибка фото",
-            parse_mode=types.ParseMode.HTML
-        )
+        logger.error(f"Ошибка отправки: {e}")
+        try:
+            await bot.send_message(chat_id=chat_id, text=text + "\n\n⚠️ Фото недоступно", parse_mode=HTML)
+        except Exception as e2:
+            logger.error(f"Аварийная отправка не удалась: {e2}")
+
 
 async def send_daily_rates():
-    logger.info("📨 Отправка ежедневных курсов...")
-    
-    previous_rates = load_previous_rates()
+    logger.info("Ежедневная рассылка...")
+    prev  = load_previous_rates()
     rates = await fetch_exchange_rates()
-    
-    if rates:
-        current_date = datetime.now()
-        message_text = format_rates_message_mobile(rates, previous_rates, current_date)
-        
-        try:
-            save_previous_rates(rates)
-            save_rates_history(rates)
-            
-            stats['total_sent'] += 1
-            stats['last_update'] = current_date
-            save_stats()
-            
-            await send_rates_with_photo(CHAT_ID, message_text)
-            logger.info("✅ Курсы успешно отправлены")
-        except Exception as e:
-            logger.error(f"❌ Ошибка при отправке: {e}")
-    else:
-        logger.error("❌ Не удалось получить курсы")
+    if not rates:
+        logger.error("Не удалось получить курсы")
         try:
             await bot.send_message(
                 chat_id=CHAT_ID,
-                text="❌ <b>НЕ УДАЛОСЬ ПОЛУЧИТЬ КУРСЫ</b>\nПроверьте соединение",
+                text="❌ Не удалось получить курсы валют. Проверьте соединение.",
                 parse_mode=types.ParseMode.HTML
             )
-        except:
-            pass
+        except Exception as e:
+            logger.error(f"Ошибка уведомления: {e}")
+        return
+    save_previous_rates(rates)
+    save_rates_history(rates)
+    stats['total_sent']  += 1
+    stats['last_update']  = datetime.now()
+    save_stats()
+    await send_message_smart(CHAT_ID, msg_rates(rates, prev, datetime.now()))
+    logger.info("Рассылка отправлена")
 
-@dp.callback_query_handler(lambda c: c.data == 'setup_photo')
-async def process_setup_photo(callback_query: types.CallbackQuery):
-    await bot.answer_callback_query(callback_query.id)
-    await bot.send_message(
-        callback_query.from_user.id,
-        """
-📸 НАСТРОЙКА ФОТО
-
-1️⃣ Отправьте фото боту
-2️⃣ /set_photo_path /путь/к/фото.jpg
-3️⃣ /set_photo_url https://example.com/photo.jpg
-        """,
-        parse_mode=types.ParseMode.HTML
-    )
-
-@dp.callback_query_handler(lambda c: c.data == 'show_stats')
-async def process_stats_callback(callback_query: types.CallbackQuery):
-    await bot.answer_callback_query(callback_query.id, text="📊 Статистика")
-    
-    stats_text = f"""
-╔════════════════════╗
-║   📊 СТАТИСТИКА   ║
-╠════════════════════╣
-║👥 {len(stats['users_count'])} польз.     ║
-║📨 {stats['total_sent']} отправок  ║
-║🔄 {stats['total_requests']} запросов ║
-║📸 {'ВКЛ' if photo_settings['use_photo'] else 'ВЫКЛ'}          ║
-╚════════════════════╝
-"""
-    
-    await bot.send_message(
-        callback_query.from_user.id,
-        stats_text,
-        parse_mode=types.ParseMode.HTML
-    )
-
-@dp.callback_query_handler(lambda c: c.data == 'test_photo')
-async def process_test_photo(callback_query: types.CallbackQuery):
-    await bot.answer_callback_query(callback_query.id, text="📸 Тест...")
-    
-    previous_rates = load_previous_rates()
-    rates = await fetch_exchange_rates()
-    
-    if rates:
-        current_date = datetime.now()
-        message_text = format_rates_message_mobile(rates, previous_rates, current_date)
-        
-        await send_rates_with_photo(callback_query.from_user.id, message_text)
-        await bot.send_message(
-            callback_query.from_user.id,
-            "✅ Тест отправлен!",
-            parse_mode=types.ParseMode.HTML
-        )
-    else:
-        await bot.send_message(
-            callback_query.from_user.id,
-            "❌ Ошибка получения курсов",
-            parse_mode=types.ParseMode.HTML
-        )
-
-@dp.callback_query_handler(lambda c: c.data == 'disable_photo')
-async def process_disable_photo(callback_query: types.CallbackQuery):
-    photo_settings['use_photo'] = False
-    save_photo_settings()
-    await bot.answer_callback_query(callback_query.id, text="✅ Фото отключено")
-    await bot.send_message(
-        callback_query.from_user.id,
-        "✅ Фото отключено",
-        parse_mode=types.ParseMode.HTML
-    )
-
-@dp.callback_query_handler(lambda c: c.data == 'check_photo')
-async def process_check_photo(callback_query: types.CallbackQuery):
-    status = "🟢 ВКЛ" if photo_settings['use_photo'] else "🔴 ВЫКЛ"
-    
-    await bot.answer_callback_query(callback_query.id)
-    await bot.send_message(
-        callback_query.from_user.id,
-        f"""
-📸 СТАТУС ФОТО
-
-Статус: {status}
-/admin для настройки
-        """,
-        parse_mode=types.ParseMode.HTML
-    )
 
 @dp.message_handler(commands=['start'])
 async def cmd_start(message: types.Message):
     if str(message.chat.id).startswith('-100'):
         return
-    
     stats['users_count'].add(message.from_user.id)
     stats['total_requests'] += 1
     save_stats()
-    
-    welcome_text = """
-╔════════════════════╗
-║  💎NT SHIPPING💎   ║
-╠════════════════════╣
-║   👋 ДОБРО          ║
-║   ПОЖАЛОВАТЬ!      ║
-╠════════════════════╣
-║📊 Курсы ЦБ РФ      ║
-║💵 USD/EUR/CNY      ║
-╠════════════════════╣
-║⚡ ВОЗМОЖНОСТИ:      ║
-║✅ Рассылка 8:00    ║
-║✅ Тренды           ║
-║✅ История          ║
-║✅ Аналитика        ║
-╠════════════════════╣
-║📋 КОМАНДЫ:         ║
-║💰 /rates - курсы   ║
-║📈 /trends - история║
-║📊 /analytics - анал║
-║ℹ️ /help - помощь   ║
-║👤 /about - о боте  ║
-╚════════════════════╝
-    """
-    
-    await message.reply(welcome_text, parse_mode=types.ParseMode.HTML)
+    await message.reply(msg_start(), parse_mode=types.ParseMode.HTML)
+
+
+@dp.message_handler(commands=['help'])
+async def cmd_help(message: types.Message):
+    if str(message.chat.id).startswith('-100'):
+        return
+    await message.reply(msg_help(), parse_mode=types.ParseMode.HTML)
+
+
+@dp.message_handler(commands=['about'])
+async def cmd_about(message: types.Message):
+    if str(message.chat.id).startswith('-100'):
+        return
+    await message.reply(msg_about(), parse_mode=types.ParseMode.HTML)
+
+
+@dp.message_handler(commands=['rates'])
+async def cmd_rates(message: types.Message):
+    if str(message.chat.id).startswith('-100'):
+        return
+    stats['users_count'].add(message.from_user.id)
+    stats['total_requests'] += 1
+    save_stats()
+    wait = await message.reply("🔄 Получаю курсы...", parse_mode=types.ParseMode.HTML)
+    prev  = load_previous_rates()
+    rates = await fetch_exchange_rates()
+    try:
+        await bot.delete_message(message.chat.id, wait.message_id)
+    except Exception:
+        pass
+    if rates:
+        save_previous_rates(rates)
+        save_rates_history(rates)
+        await send_message_smart(message.chat.id, msg_rates(rates, prev, datetime.now()))
+    else:
+        await message.reply("❌ Не удалось получить курсы. Попробуйте позже.", parse_mode=types.ParseMode.HTML)
+
+
+@dp.message_handler(commands=['trends'])
+async def cmd_trends(message: types.Message):
+    if str(message.chat.id).startswith('-100'):
+        return
+    stats['users_count'].add(message.from_user.id)
+    stats['total_requests'] += 1
+    save_stats()
+    await message.reply(msg_trends(rates_history), parse_mode=types.ParseMode.HTML)
+
+
+@dp.message_handler(commands=['analytics'])
+async def cmd_analytics(message: types.Message):
+    if str(message.chat.id).startswith('-100'):
+        return
+    stats['users_count'].add(message.from_user.id)
+    stats['total_requests'] += 1
+    save_stats()
+    await message.reply(msg_analytics(rates_history), parse_mode=types.ParseMode.HTML)
+
 
 @dp.message_handler(commands=['admin'])
 async def cmd_admin(message: types.Message):
     if message.from_user.id not in ADMIN_IDS:
         await message.reply("⛔ Нет доступа")
         return
-    
-    admin_text = f"""
-╔════════════════════╗
-║    ⚙️ АДМИН       ║
-╠════════════════════╣
-║📸 Фото: {'ВКЛ' if photo_settings['use_photo'] else 'ВЫКЛ'}║
-║👥 {len(stats['users_count'])} польз.     ║
-║📨 {stats['total_sent']} отправок  ║
-╚════════════════════╝
-    """
-    
-    await message.reply(admin_text, parse_mode=types.ParseMode.HTML, reply_markup=create_admin_keyboard())
+    await message.reply(msg_admin(), parse_mode=types.ParseMode.HTML, reply_markup=admin_keyboard())
 
-@dp.message_handler(commands=['help'])
-async def cmd_help(message: types.Message):
-    help_text = """
-╔════════════════════╗
-║    📚 ПОМОЩЬ      ║
-╠════════════════════╣
-║📌 ДОБАВЛЕНИЕ:     ║
-║1. Настройки канала║
-║2. Администраторы  ║
-║3. Добавить бота   ║
-║4. Разрешить отправ║
-╠════════════════════╣
-║📋 КОМАНДЫ:        ║
-║💰 /rates - курсы  ║
-║📈 /trends - истор ║
-║📊 /analytics - ана║
-║ℹ️ /help - помощь  ║
-╠════════════════════╣
-║😊 СМАЙЛИКИ:       ║
-║📈 - рост         ║
-║📉 - падение      ║
-║🟢 - позитив      ║
-║🔴 - негатив      ║
-╚════════════════════╝
-    """
-    
-    await message.reply(help_text, parse_mode=types.ParseMode.HTML)
-
-@dp.message_handler(commands=['about'])
-async def cmd_about(message: types.Message):
-    about_text = """
-╔════════════════════╗
-║  💎NT SHIPPING💎   ║
-╠════════════════════╣
-║🤖 О БОТЕ          ║
-║📌 v4.0            ║
-║📌 ЦБ РФ           ║
-║📌 8:00 МСК        ║
-╠════════════════════╣
-║📊 ФУНКЦИИ:        ║
-║✅ Авторассылка    ║
-║✅ Тренды          ║
-║✅ История         ║
-║✅ Аналитика       ║
-╠════════════════════╣
-║👨‍💻 @fuckForensics ║
-║🌐 nt-shipping.ru  ║
-╚════════════════════╝
-    """
-    
-    await message.reply(about_text, parse_mode=types.ParseMode.HTML)
-
-@dp.message_handler(commands=['rates'])
-async def cmd_rates(message: types.Message):
-    if str(message.chat.id).startswith('-100'):
-        return
-    
-    stats['users_count'].add(message.from_user.id)
-    stats['total_requests'] += 1
-    save_stats()
-    
-    await message.reply("🔄 Получаю...", parse_mode=types.ParseMode.HTML)
-    
-    previous_rates = load_previous_rates()
-    rates = await fetch_exchange_rates()
-    
-    if rates:
-        save_previous_rates(rates)
-        save_rates_history(rates)
-        
-        current_date = datetime.now()
-        message_text = format_rates_message_mobile(rates, previous_rates, current_date)
-        
-        await send_rates_with_photo(message.chat.id, message_text)
-    else:
-        await message.reply("❌ Ошибка получения", parse_mode=types.ParseMode.HTML)
-
-@dp.message_handler(commands=['trends'])
-async def cmd_trends(message: types.Message):
-    if str(message.chat.id).startswith('-100'):
-        return
-    
-    if rates_history:
-        message_text = format_trends_message_mobile(rates_history)
-        await message.reply(message_text, parse_mode=types.ParseMode.HTML)
-    else:
-        await message.reply("❌ Нет данных")
-
-@dp.message_handler(commands=['analytics'])
-async def cmd_analytics(message: types.Message):
-    if str(message.chat.id).startswith('-100'):
-        return
-    
-    if not rates_history or len(rates_history) < 2:
-        await message.reply("❌ Мало данных")
-        return
-    
-    recent = list(rates_history)[-5:]
-    
-    usd_values = [item['rates'].get('USD', 0) for item in recent]
-    eur_values = [item['rates'].get('EUR', 0) for item in recent]
-    cny_values = [item['rates'].get('CNY', 0) for item in recent]
-    
-    analytics_text = f"""
-╔════════════════════╗
-║   📊 АНАЛИТИКА    ║
-╠════════════════════╣
-║🇺🇸 USD            ║
-║📊 {usd_values[-1]:.2f} ₽        ║
-║📈 ср:{sum(usd_values)/5:.2f}₽   ║
-║                    ║
-║🇪🇺 EUR            ║
-║📊 {eur_values[-1]:.2f} ₽        ║
-║📈 ср:{sum(eur_values)/5:.2f}₽   ║
-║                    ║
-║🇨🇳 CNY            ║
-║📊 {cny_values[-1]:.2f} ₽        ║
-║📈 ср:{sum(cny_values)/5:.2f}₽   ║
-╚════════════════════╝
-    """
-    
-    await message.reply(analytics_text, parse_mode=types.ParseMode.HTML)
 
 @dp.message_handler(commands=['set_photo_path'])
 async def cmd_set_photo_path(message: types.Message):
     if message.from_user.id not in ADMIN_IDS:
         return
-    
     path = message.get_args().strip()
     if not path:
-        await message.reply("❌ Укажите путь")
+        await message.reply("❌ Укажите путь\nПример: /set_photo_path /home/user/photo.jpg")
         return
-    
     if os.path.exists(path):
-        photo_settings['use_photo'] = True
-        photo_settings['photo_path'] = path
-        photo_settings['photo_url'] = ''
-        photo_settings['photo_file_id'] = ''
+        photo_settings.update({'use_photo': True, 'photo_path': path, 'photo_url': '', 'photo_file_id': ''})
         save_photo_settings()
-        await message.reply(f"✅ Путь сохранен")
+        await message.reply(f"✅ Фото установлено:\n<code>{path}</code>", parse_mode=types.ParseMode.HTML)
     else:
-        await message.reply("❌ Файл не найден")
+        await message.reply("❌ Файл не найден. Проверьте путь.")
+
 
 @dp.message_handler(commands=['set_photo_url'])
 async def cmd_set_photo_url(message: types.Message):
     if message.from_user.id not in ADMIN_IDS:
         return
-    
     url = message.get_args().strip()
     if not url:
-        await message.reply("❌ Укажите URL")
+        await message.reply("❌ Укажите URL\nПример: /set_photo_url https://example.com/photo.jpg")
         return
-    
-    photo_settings['use_photo'] = True
-    photo_settings['photo_url'] = url
-    photo_settings['photo_path'] = ''
-    photo_settings['photo_file_id'] = ''
+    photo_settings.update({'use_photo': True, 'photo_url': url, 'photo_path': '', 'photo_file_id': ''})
     save_photo_settings()
-    await message.reply(f"✅ URL сохранен")
+    await message.reply("✅ URL фото сохранён")
+
 
 @dp.message_handler(content_types=['photo'])
 async def handle_photo(message: types.Message):
     if message.from_user.id in ADMIN_IDS:
-        photo_settings['use_photo'] = True
-        photo_settings['photo_file_id'] = message.photo[-1].file_id
-        photo_settings['photo_path'] = ''
-        photo_settings['photo_url'] = ''
+        photo_settings.update({
+            'use_photo':     True,
+            'photo_file_id': message.photo[-1].file_id,
+            'photo_path':    '',
+            'photo_url':     ''
+        })
         save_photo_settings()
-        await message.reply("✅ Фото сохранено!")
-    
-    if message.caption and '/rates' in message.caption:
-        if str(message.chat.id).startswith('-100'):
-            return
-        
-        await message.reply("🔄 Получаю...", parse_mode=types.ParseMode.HTML)
-        
-        previous_rates = load_previous_rates()
-        rates = await fetch_exchange_rates()
-        
-        if rates:
-            save_previous_rates(rates)
-            current_date = datetime.now()
-            message_text = format_rates_message_mobile(rates, previous_rates, current_date)
-            
-            await message.reply_photo(
-                photo=message.photo[-1].file_id,
-                caption=message_text,
-                parse_mode=types.ParseMode.HTML
-            )
+        await message.reply("✅ Фото сохранено и будет использоваться при рассылке")
+
+
+@dp.callback_query_handler(lambda c: c.data == 'show_stats')
+async def cb_show_stats(cq: types.CallbackQuery):
+    await bot.answer_callback_query(cq.id)
+    await bot.send_message(cq.from_user.id, msg_stats(), parse_mode=types.ParseMode.HTML)
+
+
+@dp.callback_query_handler(lambda c: c.data == 'setup_photo')
+async def cb_setup_photo(cq: types.CallbackQuery):
+    await bot.answer_callback_query(cq.id)
+    await bot.send_message(
+        cq.from_user.id,
+        "📸 <b>Настройка фото</b>\n"
+        "\n"
+        "Выберите способ:\n"
+        "1️⃣ Отправьте фото прямо боту\n"
+        "2️⃣ /set_photo_path /путь/к/файлу.jpg\n"
+        "3️⃣ /set_photo_url https://ссылка.на/фото.jpg",
+        parse_mode=types.ParseMode.HTML
+    )
+
+
+@dp.callback_query_handler(lambda c: c.data == 'test_photo')
+async def cb_test_photo(cq: types.CallbackQuery):
+    await bot.answer_callback_query(cq.id, text="Отправляю тест...")
+    prev  = load_previous_rates()
+    rates = await fetch_exchange_rates()
+    if rates:
+        await send_message_smart(cq.from_user.id, msg_rates(rates, prev, datetime.now()))
+    else:
+        await bot.send_message(cq.from_user.id, "❌ Не удалось получить курсы")
+
+
+@dp.callback_query_handler(lambda c: c.data == 'disable_photo')
+async def cb_disable_photo(cq: types.CallbackQuery):
+    photo_settings['use_photo'] = False
+    save_photo_settings()
+    await bot.answer_callback_query(cq.id, text="Фото отключено")
+    await bot.send_message(cq.from_user.id, "❌ Фото отключено. Бот будет отправлять только текст.")
+
+
+@dp.callback_query_handler(lambda c: c.data == 'check_photo')
+async def cb_check_photo(cq: types.CallbackQuery):
+    await bot.answer_callback_query(cq.id)
+    status  = "✅ включено" if photo_settings['use_photo'] else "❌ выключено"
+    fid     = photo_settings.get('photo_file_id') or "—"
+    path    = photo_settings.get('photo_path')    or "—"
+    url     = photo_settings.get('photo_url')     or "—"
+    short   = (fid[:25] + "...") if fid != "—" else "—"
+    await bot.send_message(
+        cq.from_user.id,
+        f"📸 <b>Статус фото</b>\n"
+        f"\n"
+        f"Режим: {status}\n"
+        f"File ID: <code>{short}</code>\n"
+        f"Путь: {path}\n"
+        f"URL: {url}",
+        parse_mode=types.ParseMode.HTML
+    )
+
 
 async def on_startup(dp):
-    logger.info("🚀 ЗАПУСК...")
-    
+    logger.info("Запуск бота...")
     load_photo_settings()
     load_rates_history()
     load_stats()
-    
-    logger.info(f"📊 История: {len(rates_history)}")
-    logger.info(f"👥 Пользователей: {len(stats['users_count'])}")
-    
-    scheduler.add_job(
-        send_daily_rates,
-        trigger="cron",
-        hour=8,
-        minute=0,
-        id="daily_rates",
-        replace_existing=True
-    )
+    scheduler.add_job(send_daily_rates, trigger="cron", hour=8, minute=0,
+                      id="daily_rates", replace_existing=True)
     scheduler.start()
-    logger.info("⏰ Планировщик: 8:00 МСК")
-    
     for admin_id in ADMIN_IDS:
         try:
             await bot.send_message(
                 admin_id,
-                f"""
-╔════════════════════╗
-║   ✅ ЗАПУЩЕН      ║
-╠════════════════════╣
-║⏰ 8:00 МСК        ║
-║📊 {CHAT_ID}       ║
-║📸 {'ВКЛ' if photo_settings['use_photo'] else 'ВЫКЛ'}║
-║👥 {len(stats['users_count'])} польз.║
-╚════════════════════╝
-                """,
+                f"✅ <b>Бот запущен</b>\n"
+                f"\n"
+                f"⏰ Рассылка: 08:00 МСК\n"
+                f"📡 Канал: {CHAT_ID}\n"
+                f"📸 Фото: {'включено' if photo_settings['use_photo'] else 'выключено'}\n"
+                f"👥 Пользователей: {len(stats['users_count'])}",
                 parse_mode=types.ParseMode.HTML
             )
         except Exception as e:
-            logger.error(f"Ошибка уведомления: {e}")
+            logger.error(f"Не удалось уведомить админа {admin_id}: {e}")
+
 
 async def on_shutdown(dp):
-    logger.info("🛑 ОСТАНОВКА...")
+    logger.info("Остановка бота...")
     save_stats()
     scheduler.shutdown()
     await bot.close()
+
 
 if __name__ == "__main__":
     executor.start_polling(
