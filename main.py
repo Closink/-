@@ -565,6 +565,7 @@ async def on_startup(dp):
     load_rates_history()
     load_stats()
     scheduler.add_job(send_daily_rates, trigger="cron", hour=8, minute=0,
+                      day_of_week="tue,wed,thu,fri",
                       id="daily_rates", replace_existing=True)
     scheduler.start()
     for admin_id in ADMIN_IDS:
